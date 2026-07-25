@@ -21,11 +21,10 @@ const queue = [
 
 function App() {
   const [view, setView] = useState<View>('overview')
-  const [email, setEmail] = useState('')
-  const [signedUp, setSignedUp] = useState(() => Boolean(localStorage.getItem('vinted-signal-waitlist')))
   const [notice, setNotice] = useState('')
   const [running, setRunning] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
+  const [authLoading, setAuthLoading] = useState(true)
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
   const [adminError, setAdminError] = useState('')
@@ -39,37 +38,14 @@ function App() {
     setCampaigns(result.campaigns || [])
   }
   useEffect(() => {
-    void fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...attribution(), event: 'page_view', sessionId: sessionId(), path: window.location.pathname }),
-    }).catch(() => undefined)
-  }, [])
-  useEffect(() => {
     void fetch('/api/admin/session', { credentials: 'same-origin' }).then((response) => response.json()).then((result: { authenticated?: boolean }) => {
       if (result.authenticated) {
         setAuthenticated(true)
         void loadLatestCampaigns()
       }
-    }).catch(() => undefined)
+    }).catch(() => undefined).finally(() => setAuthLoading(false))
   }, [])
-  async function submitWaitlist(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!email.includes('@')) { setNotice('Enter a valid email to join the waitlist.'); return }
-    try {
-      const response = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, path: window.location.pathname, ...attribution() }) })
-      if (!response.ok) throw new Error('API unavailable')
-    } catch {
-      localStorage.setItem('vinted-signal-waitlist', email)
-    }
-    setSignedUp(true); setNotice('You are on the list. We will send the first signal report soon.')
-  }
   async function runLiveCampaign() {
-    if (!authenticated) {
-      setView('content')
-      setAdminError('Sign in to run a campaign.')
-      return
-    }
     setRunning(true)
     try {
       const response = await fetch('/api/campaigns/run', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
@@ -101,6 +77,8 @@ function App() {
     setAuthenticated(false)
     setCampaigns([])
   }
+  if (authLoading) return <div className="auth-shell"><p>Checking operator session…</p></div>
+  if (!authenticated) return <div className="auth-shell"><AdminLogin email={adminEmail} password={adminPassword} error={adminError} onEmailChange={setAdminEmail} onPasswordChange={setAdminPassword} onSubmit={loginAdmin} /></div>
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">VS</div><div><strong>Vinted Signal</strong><span>Growth OS</span></div></div>
@@ -112,12 +90,11 @@ function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
       {view === 'overview' && <Overview onExplore={() => setView('trends')} />}
       {view === 'trends' && <section className="page-section"><PageIntro eyebrow="DEMAND VALIDATION" title="Trend radar" description="Every signal is scored for momentum, commercial intent, and relevance to Vinted sellers." action={<button className="primary-button" onClick={() => setNotice('Discovery run queued for the next available worker.')}>Run discovery <span>↗</span></button>} /><div className="filter-row"><div className="tabs"><button className="active">All signals <span>24</span></button><button>Approved <span>18</span></button><button>Needs review <span>6</span></button></div><select value={trendFilter} onChange={(event) => setTrendFilter(event.target.value)}><option>All sources</option><option>Google Trends</option><option>Pinterest</option><option>Reddit</option><option>RSS</option></select></div><TrendTable data={filteredTrends} /></section>}
-      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Sign in once, then run the AI campaign engine from this dashboard." action={authenticated ? <><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></> : undefined} />{authenticated ? <LiveCampaigns campaigns={campaigns} /> : <AdminLogin email={adminEmail} password={adminPassword} error={adminError} onEmailChange={setAdminEmail} onPasswordChange={setAdminPassword} onSubmit={loginAdmin} />}</section>}
+      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Run the AI campaign engine from this authenticated dashboard." action={<><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></>} /><LiveCampaigns campaigns={campaigns} /></section>}
       {view === 'queue' && <section className="page-section"><PageIntro eyebrow="DISTRIBUTION" title="Publishing queue" description="Your approved content is queued across channels with built-in retry handling." action={<button className="secondary-button" onClick={() => setNotice('Queue exported as CSV.')}>Export queue</button>} /><div className="queue-list">{queue.map((item) => <div className="queue-item" key={item.title}><div className={`social-icon ${item.color}`}>{item.icon}</div><div className="queue-copy"><b>{item.title}</b><span>{item.platform} · {item.time}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status}</span><button className="more">•••</button></div>)}</div></section>}
       {view === 'leads' && <section className="page-section"><PageIntro eyebrow="DEMAND SIGNAL" title="Waitlist" description="Capture early interest before launch and understand which content turns into qualified demand." action={<button className="secondary-button" onClick={() => setNotice('CSV export prepared.')}>Export leads</button>} /><div className="lead-layout"><div className="lead-card"><span className="eyebrow">TOTAL SIGNUPS</span><strong>248</strong><span className="positive">↑ 24% this week</span><div className="sparkline">{Array.from({ length: 11 }, (_, index) => <i key={index} />)}</div></div><div className="lead-card"><span className="eyebrow">CONVERSION RATE</span><strong>6.8%</strong><span className="positive">↑ 1.2 pts this week</span><div className="conversion-bar"><span /></div><small>Landing page visitors · 3,647</small></div></div><div className="lead-table"><div className="table-heading"><span>Recent signups</span><span>Source</span><span>Joined</span></div>{['anna@vintageclub.co', 'milo.resells@gmail.com', 'hello@retro-room.com', 'kasia.thrift@gmail.com'].map((lead, index) => <div className="table-row" key={lead}><b>{lead}</b><span>{['Instagram', 'Google', 'TikTok', 'Pinterest'][index]}</span><span>Today, {['14:32', '12:08', '10:41', '09:16'][index]}</span></div>)}</div></section>}
       {notice && <button className="toast" onClick={() => setNotice('')}>{notice} <span>×</span></button>}
     </main>
-    <section className="landing-card"><div className="landing-copy"><span className="eyebrow">COMING SOON · FOR VINTED SELLERS</span><h2>Find the next trend<br /><i>before everyone else.</i></h2><p>Weekly signals from the Vinted marketplace, scored by AI and delivered before the market gets crowded.</p>{signedUp ? <div className="signed-up">✓ You’re on the waitlist</div> : <form onSubmit={submitWaitlist}><input aria-label="Email address" placeholder="Your email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /><button type="submit">Join waitlist <span>↗</span></button></form>}<small>{signedUp ? 'We’ll be in touch soon.' : 'No spam. Just early access and useful signals.'}</small></div><div className="landing-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="trend-card floating"><span className="mini-label">TREND SIGNAL · 94/100</span><b>Adidas Samba OG</b><div className="trend-metric"><span>Momentum</span><strong>+28%</strong></div><div className="mini-chart">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div></div><div className="signal-dot dot-one">✦</div><div className="signal-dot dot-two">↗</div></div></section>
   </div>
 }
 
@@ -131,28 +108,6 @@ function LiveCampaigns({ campaigns }: { campaigns: LiveCampaign[] }) {
     const tracking = campaign.content.tracking as { links?: Record<string, string> } | undefined
     return <article className="studio-preview" key={campaign.id}><div><span className="eyebrow">CAMPAIGN · {campaign.provider.toUpperCase()}</span><h2>{campaign.trend.topic}</h2><pre>{JSON.stringify(campaign.content, null, 2)}</pre>{tracking?.links && <div className="asset-pills">{Object.entries(tracking.links).map(([channel, link]) => <a href={link} key={channel} target="_blank" rel="noreferrer">{channel} ↗</a>)}</div>}</div></article>
   })}</div>
-}
-
-function sessionId() {
-  const key = 'vinted-signal-session'
-  const existing = localStorage.getItem(key)
-  if (existing) return existing
-  const created = crypto.randomUUID()
-  localStorage.setItem(key, created)
-  return created
-}
-
-function attribution() {
-  const params = new URLSearchParams(window.location.search)
-  return {
-    source: params.get('utm_source') || 'direct',
-    landingVariant: params.get('variant') || 'default',
-    utmSource: params.get('utm_source') || undefined,
-    utmMedium: params.get('utm_medium') || undefined,
-    utmCampaign: params.get('utm_campaign') || undefined,
-    utmContent: params.get('utm_content') || undefined,
-    referrer: document.referrer || undefined,
-  }
 }
 
 function NavItem({ icon, label, active, badge, onClick }: { icon: string; label: string; active?: boolean; badge?: string; onClick?: () => void }) { return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span>{icon}</span>{label}{badge && <b>{badge}</b>}</button> }
