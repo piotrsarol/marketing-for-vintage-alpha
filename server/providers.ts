@@ -97,11 +97,13 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
     })
   })
   const signalTerms = /\b(trend|trends|demand|popular|popularity|growth|growing|price|pricing|sales|selling|sell-through|inventory|sourcing|resale|reseller|second-hand|category|popyt|popularn|rośnie|wzrost|cena|ceny|sprzedaż|sprzedają|zapas|zatowarowanie|odsprzedaż|kategoria|marża)\b/i
+  const trendEvidenceTerms = /\b(trend|trends|demand|popular|popularity|growth|growing|rising|search interest|sell-through|inventory|sourcing|popyt|popularn|rośnie|wzrost|zainteresowanie|wyszukiw|zapotrzebowanie|rotacj|zatowarowanie)\b/i
   const sellerContextTerms = /\b(vinted|resale|reseller|second-hand|fashion|clothing|sneaker|vintage|odzież|ubrania|buty|moda|vintage|sprzedawc)\b/i
   const politicalTerms = /\b(politic|political|government|minister|election|sejm|rząd|polityk|polityka|wybory|wojna|felieton|opinia|opinion)\b/i
+  const genericAdviceTerms = /\b(how to|ways to|tips|guide|increase sales|jak zwiększyć sprzedaż|poradnik|sposobów)\b/i
   const relevant = signals.filter((signal) => {
     const evidence = `${signal.evidence} ${signal.source}`
-    return sellerContextTerms.test(evidence) && signalTerms.test(evidence) && !(politicalTerms.test(evidence) && !/\b(resale|second-hand|fashion|clothing|sneaker|odzież|ubrania|buty|moda)\b/i.test(evidence))
+    return sellerContextTerms.test(evidence) && signalTerms.test(evidence) && trendEvidenceTerms.test(evidence) && !(genericAdviceTerms.test(evidence) && !trendEvidenceTerms.test(signal.topic)) && !(politicalTerms.test(evidence) && !/\b(resale|second-hand|fashion|clothing|sneaker|odzież|ubrania|buty|moda)\b/i.test(evidence))
   })
   const seen = new Set<string>()
   return relevant.filter((signal) => {
@@ -129,7 +131,7 @@ export async function evaluateTrend(signal: TrendSignal, product: ProductConfig)
   const result = await askOpenAI<Evaluation>(`Evaluate whether this is an actionable market signal for a product that predicts what will grow on Vinted. Ignore political, celebrity, opinion, brand-news, or general culture stories unless they contain concrete evidence about seller demand, product categories, prices, sales, inventory, sourcing, or resale growth. Score irrelevant stories below 50. Return JSON only with numeric 0-100 fields score, virality, commercialIntent, novelty, evergreenScore, vintedRelevance, predictedEngagement, opportunityConfidence and arrays contentAngles, hooks, targetAudience plus strings opportunityType (product_rising_interest, pricing, seasonality, inventory, or education), productCategory, demandEvidence, supplyStatus (unverified or hypothesis), recommendedAction and reasoning. Never state that supply is low unless the source provides supply/listing evidence; use supplyStatus=hypothesis otherwise. Write all natural-language fields in ${product.language}.\nProduct: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}`)
   if (result) return { ...result, score: numberInRange(result.score, 70) }
   const score = Math.min(96, 62 + signal.keywords.length * 4)
-  return { score, virality: score - 3, commercialIntent: score + 2, novelty: score - 8, evergreenScore: score - 15, vintedRelevance: score + 1, predictedEngagement: score - 2, reasoning: `Fallback scoring used because OPENAI_API_KEY is not configured. Evidence: ${signal.evidence}`, contentAngles: ['early demand signal', 'how to source before saturation'], hooks: [`The next resale signal may already be in your feed: ${signal.topic}.`], targetAudience: product.audience, opportunityType: 'product_rising_interest', productCategory: signal.topic, demandEvidence: signal.evidence, supplyStatus: 'unverified', opportunityConfidence: Math.max(0, score - 20), recommendedAction: 'Validate current listings, prices, and competition before sourcing.' }
+  return { score, virality: score - 3, commercialIntent: score + 2, novelty: score - 8, evergreenScore: score - 15, vintedRelevance: score + 1, predictedEngagement: score - 2, reasoning: `OpenAI was unavailable for this run, so deterministic fallback scoring was used. Evidence: ${signal.evidence}`, contentAngles: ['early demand signal', 'how to source before saturation'], hooks: [`The next resale signal may already be in your feed: ${signal.topic}.`], targetAudience: product.audience, opportunityType: 'product_rising_interest', productCategory: signal.topic, demandEvidence: signal.evidence, supplyStatus: 'unverified', opportunityConfidence: Math.max(0, score - 20), recommendedAction: 'Validate current listings, prices, and competition before sourcing.' }
 }
 
 export async function generateContent(signal: TrendSignal, evaluation: Evaluation, product: ProductConfig) {
