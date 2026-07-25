@@ -1,13 +1,42 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { Campaign, DashboardSnapshot, DashboardTrend, FunnelEvent, LeadAttribution, QueueItem, TrendSignal, Evaluation } from './types.js'
+import type { Campaign, DashboardSnapshot, DashboardTrend, FunnelEvent, LeadAttribution, OperatorSettings, ProductConfig, QueueItem, TrendSignal, Evaluation } from './types.js'
 
 const dataDirectory = path.resolve(process.cwd(), '.data')
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 export const storageProvider = supabaseUrl && supabaseKey ? 'supabase' : 'local'
 const storageTimeoutMs = 10_000
+
+export async function loadOperatorSettings(fallback: ProductConfig): Promise<OperatorSettings> {
+  if (storageProvider === 'supabase') {
+    try {
+      const rows = await supabaseRequest<Array<{ product: ProductConfig; updated_at: string }>>('operator_settings?id=eq.default&select=product,updated_at&limit=1')
+      if (rows[0]) return { id: 'default', product: rows[0].product, updatedAt: rows[0].updated_at }
+    } catch (error) {
+      console.warn(error instanceof Error ? error.message : 'Operator settings read failed; using environment defaults.')
+    }
+  } else {
+    const rows = await readCollection<OperatorSettings>('operator-settings')
+    if (rows[0]) return rows[0]
+  }
+  return { id: 'default', product: fallback, updatedAt: new Date(0).toISOString() }
+}
+
+export async function saveOperatorSettings(product: ProductConfig): Promise<OperatorSettings> {
+  const settings: OperatorSettings = { id: 'default', product, updatedAt: new Date().toISOString() }
+  if (storageProvider === 'supabase') {
+    await supabaseRequest('operator_settings', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ id: settings.id, product: settings.product, updated_at: settings.updatedAt }),
+    })
+  } else {
+    await writeCollection('operator-settings', [settings])
+  }
+  return settings
+}
 
 async function ensureDataDirectory() {
   await mkdir(dataDirectory, { recursive: true })

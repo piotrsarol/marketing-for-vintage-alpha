@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
-import { dashboardSnapshot, finishJobRun, latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
+import { dashboardSnapshot, finishJobRun, latestCampaigns, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -38,10 +38,15 @@ async function body(request: IncomingMessage) {
   return raw ? JSON.parse(raw) as Record<string, unknown> : {}
 }
 
-function productFrom(input: unknown): ProductConfig {
-  if (!input || typeof input !== 'object') return defaultProduct
+function productFrom(input: unknown, base = defaultProduct): ProductConfig {
+  if (!input || typeof input !== 'object') return base
   const value = input as Partial<ProductConfig>
-  return { ...defaultProduct, ...value, audience: Array.isArray(value.audience) ? value.audience.filter((item): item is string => typeof item === 'string') : defaultProduct.audience }
+  return { ...base, ...value, audience: Array.isArray(value.audience) ? value.audience.filter((item): item is string => typeof item === 'string') : base.audience }
+}
+
+async function configuredProduct(input?: unknown) {
+  const settings = await loadOperatorSettings(defaultProduct)
+  return productFrom(input, settings.product)
 }
 
 function stringValue(value: unknown, maxLength = 200) {
@@ -252,13 +257,13 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (url.pathname === '/api/trends/discover' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
       if (!consumeRateLimit(`trends:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
-      return json(response, 200, { trends: await discoverGoogleNews(productFrom({ country: url.searchParams.get('country') ?? undefined })) })
+      return json(response, 200, { trends: await discoverGoogleNews(await configuredProduct({ country: url.searchParams.get('country') ?? undefined })) })
     }
     if (url.pathname === '/api/campaigns/run' && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       if (!consumeRateLimit(`campaign:${clientIp(request)}`, 5)) return json(response, 429, { error: 'Rate limit exceeded' })
       const input = await body(request)
-      const product = productFrom(input.product)
+      const product = await configuredProduct(input.product)
       const jobId = await startJobRun('campaign_pipeline', { product })
       try {
         const result = await runCampaign(product)
@@ -272,30 +277,44 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     }
     if (url.pathname === '/api/campaigns/latest' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
-      const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === defaultProduct.name)
+      const product = await configuredProduct()
+      const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === product.name)
       return json(response, 200, { campaigns })
     }
     if (url.pathname === '/api/dashboard' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const product = await configuredProduct()
       const fullSnapshot = await dashboardSnapshot()
-      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === defaultProduct.name)
+      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === product.name)
       const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
       return json(response, 200, snapshot)
     }
     if (url.pathname === '/api/settings' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const product = await configuredProduct()
+      const stored = await loadOperatorSettings(defaultProduct)
       return json(response, 200, {
-        product: defaultProduct,
+        product,
+        updatedAt: stored.updatedAt,
         ai: { provider: currentProvider(), model: process.env.OPENAI_MODEL || 'gpt-5-mini' },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
       })
     }
+    if (url.pathname === '/api/settings' && request.method === 'PATCH') {
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const current = await configuredProduct()
+      const input = await body(request)
+      const product = productFrom(input.product, current)
+      const saved = await saveOperatorSettings(product)
+      return json(response, 200, { product: saved.product, updatedAt: saved.updatedAt })
+    }
     if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process') && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const product = await configuredProduct()
       const fullSnapshot = await dashboardSnapshot()
-      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === defaultProduct.name)
+      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === product.name)
       const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
       const input = await body(request)
       const requestedIds = url.pathname.endsWith('/publish') && typeof input.queueId === 'string' ? [input.queueId] : snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() <= Date.now()).map((item) => item.id)

@@ -15,3 +15,4 @@
 .settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:11px}.settings-grid .panel h2{font-size:18px;margin:12px 0 8px}.settings-grid .panel p{font-size:11px;color:#9a949f;line-height:1.5;margin:5px 0}
 .optimisation-note{margin-top:24px;padding-top:14px;border-top:1px solid #eee9f0}.optimisation-note p{font-size:11px;line-height:1.5;color:#6e6875;margin:8px 0 0}
 .campaign-strategy{margin:16px 0;padding:14px;border:1px solid #eee9f0;background:#fbfaff}.campaign-strategy p{font-size:12px;line-height:1.5;color:#5e5767;margin:8px 0}.campaign-strategy small{color:#9a949f;font-size:10px}
+.settings-form{display:flex;flex-direction:column;gap:11px}.settings-form label{display:flex;flex-direction:column;gap:5px;color:#77707f;font-size:10px}.settings-form input,.settings-form select{border:1px solid #e8e2eb;border-radius:6px;padding:9px 10px;background:#fff;color:#4d4656;font:inherit}

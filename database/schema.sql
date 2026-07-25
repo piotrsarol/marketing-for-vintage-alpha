@@ -82,6 +82,12 @@ create table if not exists job_runs (
   finished_at timestamptz
 );
 
+create table if not exists operator_settings (
+  id text primary key,
+  product jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists trends_status_idx on trends(status);
 create index if not exists publishing_queue_schedule_idx on publishing_queue(scheduled_for, status);
 create index if not exists waitlist_created_idx on waitlist_leads(created_at);
@@ -94,3 +100,4 @@ alter table publishing_queue enable row level security;
 alter table waitlist_leads enable row level security;
 alter table funnel_events enable row level security;
 alter table job_runs enable row level security;
+alter table operator_settings enable row level security;
