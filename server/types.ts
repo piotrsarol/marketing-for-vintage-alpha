@@ -9,6 +9,12 @@ export type ProductConfig = {
   searchQuery?: string
 }
 
+export type OperatorSettings = {
+  id: 'default'
+  product: ProductConfig
+  updatedAt: string
+}
+
 export type TrendSignal = {
   topic: string
   category: string
