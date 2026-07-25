@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
-import { dashboardSnapshot, latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, saveQueueItems, saveTrend, storageProvider, updateQueueItem } from './store.js'
+import { dashboardSnapshot, finishJobRun, latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -241,7 +241,18 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (url.pathname === '/api/campaigns/run' && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       if (!consumeRateLimit(`campaign:${clientIp(request)}`, 5)) return json(response, 429, { error: 'Rate limit exceeded' })
-      return json(response, 200, await runCampaign(productFrom((await body(request)).product)))
+      const input = await body(request)
+      const product = productFrom(input.product)
+      const jobId = await startJobRun('campaign_pipeline', { product })
+      try {
+        const result = await runCampaign(product)
+        await finishJobRun(jobId, 'succeeded', result)
+        return json(response, 200, result)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Campaign pipeline failed'
+        await finishJobRun(jobId, 'failed', {}, message)
+        throw error
+      }
     }
     if (url.pathname === '/api/campaigns/latest' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
@@ -254,6 +265,16 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === defaultProduct.name)
       const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
       return json(response, 200, snapshot)
+    }
+    if (url.pathname === '/api/settings' && request.method === 'GET') {
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      return json(response, 200, {
+        product: defaultProduct,
+        ai: { provider: currentProvider(), model: process.env.OPENAI_MODEL || 'gpt-5-mini' },
+        publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
+        storage: storageProvider,
+        automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
+      })
     }
     if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process') && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })

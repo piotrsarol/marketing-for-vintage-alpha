@@ -157,6 +157,28 @@ export async function updateQueueItem(id: string, update: Partial<Pick<QueueItem
   await writeCollection('publishing-queue', queue.map((item) => item.id === id ? { ...item, ...update } : item))
 }
 
+export async function startJobRun(workflow: string, input: unknown) {
+  const id = randomUUID()
+  const startedAt = new Date().toISOString()
+  if (storageProvider === 'supabase') {
+    await supabaseRequest('job_runs', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ id, workflow, status: 'running', input, started_at: startedAt }) })
+  } else {
+    const jobs = await readCollection<Record<string, unknown>>('job-runs')
+    await writeCollection('job-runs', [{ id, workflow, status: 'running', input, output: {}, startedAt }, ...jobs].slice(0, 100))
+  }
+  return id
+}
+
+export async function finishJobRun(id: string, status: 'succeeded' | 'failed', output: unknown, error?: string) {
+  const finishedAt = new Date().toISOString()
+  if (storageProvider === 'supabase') {
+    await supabaseRequest(`job_runs?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status, output, error, finished_at: finishedAt }) })
+    return
+  }
+  const jobs = await readCollection<Record<string, unknown>>('job-runs')
+  await writeCollection('job-runs', jobs.map((job) => job.id === id ? { ...job, status, output, error, finishedAt } : job))
+}
+
 export async function saveLead(email: string, attribution: LeadAttribution) {
   if (storageProvider === 'supabase') {
     try {

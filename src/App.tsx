@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import './App.css'
 
-type View = 'overview' | 'trends' | 'content' | 'queue' | 'leads'
+type View = 'overview' | 'trends' | 'content' | 'queue' | 'leads' | 'settings'
 type Trend = { id: string; topic: string; category: string; score: number; source: string; sourceType: string; audience: string; status: string; delta: string }
 type LiveCampaign = { id: string; provider: 'openai' | 'mock'; trend: { topic: string }; content: Record<string, unknown> }
 type DashboardData = {
@@ -12,6 +12,7 @@ type DashboardData = {
   leads: Array<{ email: string; source?: string; createdAt: string }>
   funnel: { pageViews: number; signups: number }
 }
+type SettingsData = { product: { name: string; url: string; country: string; audience: string[] }; ai: { provider: string; model: string }; publishing: { provider: string; configured: boolean }; storage: string; automation: { dailyWorkflow: boolean; workflowFile: string } }
 const trends: Trend[] = []
 const queue: Array<{ platform: string; icon: string; title: string; time: string; status: string; color: string }> = []
 
@@ -26,6 +27,7 @@ function App() {
   const [adminError, setAdminError] = useState('')
   const [campaigns, setCampaigns] = useState<LiveCampaign[]>([])
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
+  const [settings, setSettings] = useState<SettingsData | null>(null)
   const [trendFilter, setTrendFilter] = useState('All sources')
   const trends: Trend[] = (dashboard?.trends || []).map((trend) => ({ ...trend, sourceType: trend.source, audience: trend.targetAudience.join(', '), delta: '—' }))
   const filteredTrends = useMemo(() => trendFilter === 'All sources' ? trends : trends.filter((trend) => trend.sourceType === trendFilter), [trendFilter, trends])
@@ -33,6 +35,11 @@ function App() {
     const response = await fetch('/api/dashboard', { credentials: 'same-origin' })
     if (!response.ok) return
     setDashboard(await response.json() as DashboardData)
+  }
+  async function loadSettings() {
+    const response = await fetch('/api/settings', { credentials: 'same-origin' })
+    if (!response.ok) return
+    setSettings(await response.json() as SettingsData)
   }
   async function loadLatestCampaigns() {
     const response = await fetch('/api/campaigns/latest', { credentials: 'same-origin' })
@@ -44,7 +51,7 @@ function App() {
     void fetch('/api/admin/session', { credentials: 'same-origin' }).then((response) => response.json()).then((result: { authenticated?: boolean }) => {
       if (result.authenticated) {
         setAuthenticated(true)
-        void Promise.all([loadLatestCampaigns(), loadDashboard()])
+        void Promise.all([loadLatestCampaigns(), loadDashboard(), loadSettings()])
       }
     }).catch(() => undefined).finally(() => setAuthLoading(false))
   }, [])
@@ -81,13 +88,14 @@ function App() {
     }
     setAdminPassword('')
     setAuthenticated(true)
-    await Promise.all([loadLatestCampaigns(), loadDashboard()])
+    await Promise.all([loadLatestCampaigns(), loadDashboard(), loadSettings()])
   }
   async function logoutAdmin() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
     setAuthenticated(false)
     setCampaigns([])
     setDashboard(null)
+    setSettings(null)
   }
   if (authLoading) return <div className="auth-shell"><p>Checking operator session…</p></div>
   if (!authenticated) return <div className="auth-shell"><AdminLogin email={adminEmail} password={adminPassword} error={adminError} onEmailChange={setAdminEmail} onPasswordChange={setAdminPassword} onSubmit={loginAdmin} /></div>
@@ -95,16 +103,17 @@ function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">VS</div><div><strong>Vinted Signal</strong><span>Growth OS</span></div></div>
       <div className="workspace-switcher"><span className="avatar">PV</span><span><b>Vintage Alpha</b><small>Workspace</small></span><span className="chevron">⌄</span></div>
-      <nav><p className="nav-label">Workspace</p><NavItem icon="⌂" label="Overview" active={view === 'overview'} onClick={() => setView('overview')} /><NavItem icon="✦" label="Trend radar" active={view === 'trends'} onClick={() => setView('trends')} /><NavItem icon="▣" label="Content studio" active={view === 'content'} onClick={() => setView('content')} /><NavItem icon="◷" label="Publishing queue" active={view === 'queue'} onClick={() => setView('queue')} badge={String(dashboard?.queue.filter((item) => item.status === 'queued').length || 0)} /><NavItem icon="♧" label="Waitlist" active={view === 'leads'} onClick={() => setView('leads')} /><p className="nav-label">System</p><NavItem icon="⚙" label="Automation settings" /><NavItem icon="?" label="Help & docs" /></nav>
+      <nav><p className="nav-label">Workspace</p><NavItem icon="⌂" label="Overview" active={view === 'overview'} onClick={() => setView('overview')} /><NavItem icon="✦" label="Trend radar" active={view === 'trends'} onClick={() => setView('trends')} /><NavItem icon="▣" label="Content studio" active={view === 'content'} onClick={() => setView('content')} /><NavItem icon="◷" label="Publishing queue" active={view === 'queue'} onClick={() => setView('queue')} badge={String(dashboard?.queue.filter((item) => item.status === 'queued').length || 0)} /><NavItem icon="♧" label="Waitlist" active={view === 'leads'} onClick={() => setView('leads')} /><p className="nav-label">System</p><NavItem icon="⚙" label="Automation settings" active={view === 'settings'} onClick={() => setView('settings')} /><NavItem icon="?" label="Help & docs" /></nav>
       <div className="sidebar-footer"><div className="status-dot" /> All systems operational <span>↗</span></div>
     </aside>
     <main className="main">
-      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
+      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : view === 'settings' ? 'Automation settings' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
       {view === 'overview' && <Overview data={dashboard} onExplore={() => setView('trends')} onQueue={() => setView('queue')} />}
       {view === 'trends' && <section className="page-section"><PageIntro eyebrow="DEMAND VALIDATION" title="Trend radar" description="Every signal is scored for momentum, commercial intent, and relevance to Vinted sellers." action={<button className="primary-button" onClick={() => void runLiveCampaign()} disabled={running}>{running ? 'Running…' : 'Discover + analyse'} <span>↗</span></button>} /><div className="filter-row"><div className="tabs"><button className="active">All signals <span>{trends.length}</span></button><button>Approved <span>{trends.filter((trend) => trend.status === 'approved').length}</span></button><button>Needs review <span>{trends.filter((trend) => trend.status === 'review').length}</span></button></div><select value={trendFilter} onChange={(event) => setTrendFilter(event.target.value)}><option>All sources</option>{[...new Set(trends.map((trend) => trend.sourceType))].map((source) => <option key={source}>{source}</option>)}</select></div><TrendTable data={filteredTrends} /></section>}
       {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Run the AI campaign engine from this authenticated dashboard." action={<><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></>} /><LiveCampaigns campaigns={campaigns} /></section>}
       {view === 'queue' && <section className="page-section"><PageIntro eyebrow="DISTRIBUTION" title="Publishing queue" description="Approved content waiting for a configured publishing provider." action={<button className="secondary-button" onClick={() => setNotice('Queue export is not configured yet.')}>Export queue</button>} /><div className="queue-list">{(dashboard?.queue || []).map((item) => <div className="queue-item" key={item.id}><div className="social-icon dark">{item.platform.slice(0, 2)}</div><div className="queue-copy"><b>{item.platform} campaign asset</b><span>{new Date(item.scheduledFor).toLocaleString()}</span></div><span className={`status ${item.status}`}>{item.status}</span>{item.status === 'queued' && <button className="more" onClick={() => void publishQueueItem(item.id)}>Publish</button>}</div>)}{!dashboard?.queue.length && <EmptyState title="No publishing jobs yet" description="Generate a campaign to create the first queue items." />}</div></section>}
       {view === 'leads' && <section className="page-section"><PageIntro eyebrow="DEMAND SIGNAL" title="Waitlist" description="Real leads and funnel events collected from the connected landing page." action={<button className="secondary-button" onClick={() => setNotice('Lead export is not configured yet.')}>Export leads</button>} /><div className="lead-layout"><div className="lead-card"><span className="eyebrow">TOTAL SIGNUPS</span><strong>{dashboard?.funnel.signups || 0}</strong><span className="positive">from tracked funnel events</span></div><div className="lead-card"><span className="eyebrow">CONVERSION RATE</span><strong>{dashboard?.funnel.pageViews ? `${((dashboard.funnel.signups / dashboard.funnel.pageViews) * 100).toFixed(1)}%` : '—'}</strong><small>Landing page visits · {dashboard?.funnel.pageViews || 0}</small></div></div><div className="lead-table"><div className="table-heading"><span>Email</span><span>Source</span><span>Joined</span></div>{(dashboard?.leads || []).map((lead) => <div className="table-row" key={lead.email}><b>{lead.email}</b><span>{lead.source || 'direct'}</span><span>{new Date(lead.createdAt).toLocaleString()}</span></div>)}{!dashboard?.leads.length && <EmptyState title="No leads recorded" description="Connect the landing page to the public waitlist endpoint to see signups here." />}</div></section>}
+      {view === 'settings' && <Settings data={settings} />}
       {notice && <button className="toast" onClick={() => setNotice('')}>{notice} <span>×</span></button>}
     </main>
   </div>
@@ -135,5 +144,9 @@ export function DemoOverview({ onExplore }: { onExplore: () => void }) {
 }
 function Metric({ label, value, change, note, icon }: { label: string; value: string; change: string; note: string; icon: string }) { return <div className="metric"><div className="metric-top"><span>{label}</span><i>{icon}</i></div><strong>{value}</strong><div><em>{change}</em><small>{note}</small></div></div> }
 function EmptyState({ title, description }: { title: string; description: string }) { return <div className="empty-state"><strong>{title}</strong><span>{description}</span></div> }
+function Settings({ data }: { data: SettingsData | null }) {
+  if (!data) return <section className="page-section"><EmptyState title="Settings unavailable" description="The authenticated settings endpoint did not return data." /></section>
+  return <section className="page-section"><PageIntro eyebrow="SYSTEM" title="Automation settings" description="Runtime configuration for the campaign engine. Secrets stay in server-side environment variables." action={<span className={`status ${data.publishing.configured ? 'approved' : 'review'}`}>{data.publishing.configured ? 'Publisher connected' : 'Publisher not configured'}</span>} /><div className="settings-grid"><div className="panel"><span className="eyebrow">PRODUCT</span><h2>{data.product.name}</h2><p>{data.product.url}</p><p>{data.product.audience.join(' · ')}</p></div><div className="panel"><span className="eyebrow">AI PROVIDER</span><h2>{data.ai.provider}</h2><p>Model: {data.ai.model}</p></div><div className="panel"><span className="eyebrow">PUBLISHING</span><h2>{data.publishing.provider}</h2><p>{data.publishing.configured ? 'Queue processing can send assets to the configured webhook.' : 'Set PUBLISH_WEBHOOK_URL in Vercel to enable publishing.'}</p></div><div className="panel"><span className="eyebrow">AUTOMATION</span><h2>{data.automation.dailyWorkflow ? 'Daily workflow enabled' : 'Manual only'}</h2><p>{data.automation.workflowFile}</p></div></div></section>
+}
 function TrendTable({ data }: { data: Trend[] }) { return <div className="data-table"><div className="table-heading"><span>Trend</span><span>Source</span><span>Audience</span><span>Score</span><span>Status</span></div>{data.map((trend) => <div className="table-row" key={trend.id}><div className="trend-info"><b>{trend.topic}</b><span>{trend.category} · {trend.delta}</span></div><span>{trend.source}</span><span>{trend.audience || '—'}</span><strong className="score">{trend.score}</strong><span className={`status ${trend.status.toLowerCase().replace(' ', '-')}`}>{trend.status}</span></div>)}{!data.length && <EmptyState title="No signals recorded" description="Run discovery to collect and score current market signals." />}</div> }
 export default App
