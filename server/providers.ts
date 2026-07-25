@@ -1,4 +1,5 @@
 import type { Evaluation, ProductConfig, TrendSignal } from './types.js'
+import { discoverMarketplaceSignals } from './marketplace.js'
 
 type OpenAIResponse = { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }
 let openAIHealthy = false
@@ -138,6 +139,8 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
     return true
   })
 }
+
+export { discoverMarketplaceSignals }
 
 export function normalizeTrendTopic(topic: string) {
   return topic.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')

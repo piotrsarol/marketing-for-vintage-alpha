@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
+import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
@@ -178,7 +178,8 @@ async function json(response: ServerResponse, status: number, payload: unknown, 
 }
 
 async function runCampaign(product: ProductConfig) {
-  const discovered = await discoverGoogleNews(product)
+  const [newsSignals, marketplaceSignals] = await Promise.all([discoverGoogleNews(product), discoverMarketplaceSignals(product)])
+  const discovered = [...marketplaceSignals, ...newsSignals]
   const existingCampaigns = await latestCampaigns()
   const existingTopics = new Set(existingCampaigns
     .filter((campaign) => campaign.product.name === product.name)
@@ -262,7 +263,9 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (url.pathname === '/api/trends/discover' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
       if (!consumeRateLimit(`trends:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
-      return json(response, 200, { trends: await discoverGoogleNews(await configuredProduct({ country: url.searchParams.get('country') ?? undefined })) })
+      const product = await configuredProduct({ country: url.searchParams.get('country') ?? undefined })
+      const [newsSignals, marketplaceSignals] = await Promise.all([discoverGoogleNews(product), discoverMarketplaceSignals(product)])
+      return json(response, 200, { trends: [...marketplaceSignals, ...newsSignals] })
     }
     if (url.pathname === '/api/campaigns/run' && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
@@ -302,6 +305,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         product,
         updatedAt: stored.updatedAt,
         ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastError: providerStatus().lastProviderError },
+        marketplace: { provider: 'Scrappa', configured: Boolean(process.env.SCRAPPA_API_KEY) },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
