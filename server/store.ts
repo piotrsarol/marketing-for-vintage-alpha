@@ -241,7 +241,7 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
         latestCampaigns(),
         supabaseRequest<Array<Record<string, unknown>>>('publishing_queue?select=*&order=scheduled_for.asc&limit=100'),
         supabaseRequest<Array<{ email: string; source?: string; created_at: string }>>('waitlist_leads?select=email,source,created_at&order=created_at.desc&limit=50'),
-        supabaseRequest<Array<{ event: string }>>('funnel_events?select=event&limit=10000'),
+        supabaseRequest<Array<{ event: string; utm_campaign?: string }>>('funnel_events?select=event,utm_campaign&limit=10000'),
         supabaseRequest<Array<{ workflow: string; status: string; started_at: string; finished_at?: string; error?: string }>>('job_runs?select=workflow,status,started_at,finished_at,error&order=started_at.desc&limit=30'),
       ])
       const trends = trendRows.map((row) => ({
@@ -278,12 +278,24 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
         externalId: typeof row.external_id === 'string' ? row.external_id : undefined,
         lastError: typeof row.last_error === 'string' ? row.last_error : undefined,
       } satisfies QueueItem))
+      const campaignStats = new Map<string, { pageViews: number; signups: number }>()
+      for (const event of events) {
+        if (!event.utm_campaign) continue
+        const stats = campaignStats.get(event.utm_campaign) ?? { pageViews: 0, signups: 0 }
+        if (event.event === 'page_view') stats.pageViews += 1
+        if (event.event === 'waitlist_signup') stats.signups += 1
+        campaignStats.set(event.utm_campaign, stats)
+      }
       return {
         trends,
         campaigns,
         queue,
         leads: leads.map((lead) => ({ email: lead.email, source: lead.source, createdAt: lead.created_at })),
-        funnel: { pageViews: events.filter((event) => event.event === 'page_view').length, signups: events.filter((event) => event.event === 'waitlist_signup').length },
+        funnel: {
+          pageViews: events.filter((event) => event.event === 'page_view').length,
+          signups: events.filter((event) => event.event === 'waitlist_signup').length,
+          campaigns: [...campaignStats.entries()].map(([campaign, stats]) => ({ campaign, ...stats })).sort((left, right) => right.signups - left.signups || right.pageViews - left.pageViews),
+        },
         jobs: jobs.map((job) => ({ workflow: job.workflow, status: job.status, startedAt: job.started_at, finishedAt: job.finished_at, error: job.error })),
       }
     } catch (error) {
@@ -299,12 +311,24 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
     readCollection<FunnelEvent & { createdAt: string }>('funnel-events'),
     readCollection<{ workflow: string; status: string; startedAt: string; finishedAt?: string; error?: string }>('job-runs'),
   ])
+  const campaignStats = new Map<string, { pageViews: number; signups: number }>()
+  for (const event of events) {
+    if (!event.utmCampaign) continue
+    const stats = campaignStats.get(event.utmCampaign) ?? { pageViews: 0, signups: 0 }
+    if (event.event === 'page_view') stats.pageViews += 1
+    if (event.event === 'waitlist_signup') stats.signups += 1
+    campaignStats.set(event.utmCampaign, stats)
+  }
   return {
     trends,
     campaigns,
     queue,
     leads,
-    funnel: { pageViews: events.filter((event) => event.event === 'page_view').length, signups: events.filter((event) => event.event === 'waitlist_signup').length },
+    funnel: {
+      pageViews: events.filter((event) => event.event === 'page_view').length,
+      signups: events.filter((event) => event.event === 'waitlist_signup').length,
+      campaigns: [...campaignStats.entries()].map(([campaign, stats]) => ({ campaign, ...stats })).sort((left, right) => right.signups - left.signups || right.pageViews - left.pageViews),
+    },
     jobs,
   }
 }

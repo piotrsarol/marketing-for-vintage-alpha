@@ -81,6 +81,20 @@ docker compose up --build
 
 Import the JSON workflow in n8n. It is inactive by default so production operators explicitly enable it. The workflow now calls `POST /api/campaigns/run` and sends the configured product profile through the complete discovery → evaluation → generation path. Social publishing is intentionally a separate adapter: connect Buffer or native social APIs after reviewing the generated campaign.
 
+### Publishing integration status
+
+The application currently has a **transport seam**, not a connected social account. When `PUBLISH_WEBHOOK_URL` is set, the queue sends this payload to that secured endpoint:
+
+```json
+{
+  "platform": "instagram",
+  "scheduledFor": "2026-07-25T20:00:00.000Z",
+  "campaign": { "id": "...", "content": {}, "product": {}, "trend": {} }
+}
+```
+
+The endpoint must perform the real platform publish and return a 2xx response. It can be an n8n webhook that routes to Buffer or native platform nodes. Without it, the dashboard keeps queue items un-published and reports that no provider is configured; it never claims a post was sent.
+
 ## Architecture
 
 ```mermaid
