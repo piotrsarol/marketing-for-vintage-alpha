@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
-import { latestCampaigns, saveCampaign, saveLead } from './store.js'
+import { latestCampaigns, saveCampaign, saveLead, storageProvider } from './store.js'
 import type { Campaign, ProductConfig } from './types.js'
 
 const port = Number(process.env.PORT || 3000)
@@ -51,7 +51,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (request.method === 'OPTIONS') { response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }); response.end(); return }
-    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: process.env.OPENAI_API_KEY ? 'openai' : 'mock', time: new Date().toISOString() })
+    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: process.env.OPENAI_API_KEY ? 'openai' : 'mock', storage: storageProvider, time: new Date().toISOString() })
     if (request.method === 'GET' && url.pathname === '/api/trends/discover') return json(response, 200, { trends: await discoverGoogleNews(productFrom({ country: url.searchParams.get('country') ?? undefined })) })
     if (request.method === 'POST' && url.pathname === '/api/campaigns/run') return json(response, 200, await runCampaign(productFrom((await body(request)).product)))
     if (request.method === 'GET' && url.pathname === '/api/campaigns/latest') return json(response, 200, { campaigns: await latestCampaigns() })

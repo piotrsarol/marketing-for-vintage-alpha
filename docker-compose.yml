@@ -6,6 +6,8 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       PRODUCT_NAME: ${PRODUCT_NAME:-Your SaaS product}
       PRODUCT_URL: ${PRODUCT_URL:-https://example.com}
       PRODUCT_DESCRIPTION: ${PRODUCT_DESCRIPTION:-A SaaS product for operators who want better market signals.}
