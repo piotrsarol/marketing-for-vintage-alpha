@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import './App.css'
 
@@ -26,11 +26,18 @@ function App() {
   const [running, setRunning] = useState(false)
   const [trendFilter, setTrendFilter] = useState('All sources')
   const filteredTrends = useMemo(() => trendFilter === 'All sources' ? trends : trends.filter((trend) => trend.sourceType === trendFilter), [trendFilter])
+  useEffect(() => {
+    void fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...attribution(), event: 'page_view', sessionId: sessionId(), path: window.location.pathname }),
+    }).catch(() => undefined)
+  }, [])
   async function submitWaitlist(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!email.includes('@')) { setNotice('Enter a valid email to join the waitlist.'); return }
     try {
-      const response = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, source: 'dashboard-landing' }) })
+      const response = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, path: window.location.pathname, ...attribution() }) })
       if (!response.ok) throw new Error('API unavailable')
     } catch {
       localStorage.setItem('vinted-signal-waitlist', email)
@@ -68,6 +75,28 @@ function App() {
     </main>
     <section className="landing-card"><div className="landing-copy"><span className="eyebrow">COMING SOON · FOR VINTED SELLERS</span><h2>Find the next trend<br /><i>before everyone else.</i></h2><p>Weekly signals from the Vinted marketplace, scored by AI and delivered before the market gets crowded.</p>{signedUp ? <div className="signed-up">✓ You’re on the waitlist</div> : <form onSubmit={submitWaitlist}><input aria-label="Email address" placeholder="Your email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /><button type="submit">Join waitlist <span>↗</span></button></form>}<small>{signedUp ? 'We’ll be in touch soon.' : 'No spam. Just early access and useful signals.'}</small></div><div className="landing-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="trend-card floating"><span className="mini-label">TREND SIGNAL · 94/100</span><b>Adidas Samba OG</b><div className="trend-metric"><span>Momentum</span><strong>+28%</strong></div><div className="mini-chart">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div></div><div className="signal-dot dot-one">✦</div><div className="signal-dot dot-two">↗</div></div></section>
   </div>
+}
+
+function sessionId() {
+  const key = 'vinted-signal-session'
+  const existing = localStorage.getItem(key)
+  if (existing) return existing
+  const created = crypto.randomUUID()
+  localStorage.setItem(key, created)
+  return created
+}
+
+function attribution() {
+  const params = new URLSearchParams(window.location.search)
+  return {
+    source: params.get('utm_source') || 'direct',
+    landingVariant: params.get('variant') || 'default',
+    utmSource: params.get('utm_source') || undefined,
+    utmMedium: params.get('utm_medium') || undefined,
+    utmCampaign: params.get('utm_campaign') || undefined,
+    utmContent: params.get('utm_content') || undefined,
+    referrer: document.referrer || undefined,
+  }
 }
 
 function NavItem({ icon, label, active, badge, onClick }: { icon: string; label: string; active?: boolean; badge?: string; onClick?: () => void }) { return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span>{icon}</span>{label}{badge && <b>{badge}</b>}</button> }

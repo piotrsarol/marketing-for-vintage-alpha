@@ -42,3 +42,19 @@ export type Campaign = {
   provider: 'openai' | 'mock'
   createdAt: string
 }
+
+export type LeadAttribution = {
+  source: string
+  landingVariant?: string
+  utmSource?: string
+  utmMedium?: string
+  utmCampaign?: string
+  utmContent?: string
+  referrer?: string
+}
+
+export type FunnelEvent = LeadAttribution & {
+  event: 'page_view' | 'waitlist_signup'
+  sessionId?: string
+  path?: string
+}

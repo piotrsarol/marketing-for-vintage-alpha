@@ -23,7 +23,7 @@ async function askOpenAI<T>(prompt: string): Promise<T | null> {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5', input: prompt, text: { format: { type: 'json_object' } } }),
+      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5-mini', input: prompt, text: { format: { type: 'json_object' } } }),
     })
     if (!response.ok) {
       openAIHealthy = false

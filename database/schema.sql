@@ -48,6 +48,26 @@ create table if not exists waitlist_leads (
   email text unique not null,
   source text,
   landing_variant text,
+  utm_source text,
+  utm_medium text,
+  utm_campaign text,
+  utm_content text,
+  referrer text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists funnel_events (
+  id uuid primary key default gen_random_uuid(),
+  event text not null check (event in ('page_view', 'waitlist_signup')),
+  session_id text,
+  path text,
+  source text not null default 'direct',
+  landing_variant text,
+  utm_source text,
+  utm_medium text,
+  utm_campaign text,
+  utm_content text,
+  referrer text,
   created_at timestamptz not null default now()
 );
 
@@ -65,9 +85,12 @@ create table if not exists job_runs (
 create index if not exists trends_status_idx on trends(status);
 create index if not exists publishing_queue_schedule_idx on publishing_queue(scheduled_for, status);
 create index if not exists waitlist_created_idx on waitlist_leads(created_at);
+create index if not exists funnel_events_created_idx on funnel_events(created_at);
+create index if not exists funnel_events_campaign_idx on funnel_events(utm_campaign, event);
 
 alter table trends enable row level security;
 alter table campaigns enable row level security;
 alter table publishing_queue enable row level security;
 alter table waitlist_leads enable row level security;
+alter table funnel_events enable row level security;
 alter table job_runs enable row level security;
