@@ -7,6 +7,7 @@ create table if not exists trends (
   confidence numeric(5,2) not null default 0,
   source text not null,
   url text,
+  discovery_query text,
   country text not null default 'PL',
   season text,
   keywords text[] not null default '{}',

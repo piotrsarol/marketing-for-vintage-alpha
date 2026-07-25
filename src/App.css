@@ -17,3 +17,4 @@
 .campaign-strategy{margin:16px 0;padding:14px;border:1px solid #eee9f0;background:#fbfaff}.campaign-strategy p{font-size:12px;line-height:1.5;color:#5e5767;margin:8px 0}.campaign-strategy small{color:#9a949f;font-size:10px}
 .settings-form{display:flex;flex-direction:column;gap:11px}.settings-form label{display:flex;flex-direction:column;gap:5px;color:#77707f;font-size:10px}.settings-form input,.settings-form select{border:1px solid #e8e2eb;border-radius:6px;padding:9px 10px;background:#fff;color:#4d4656;font:inherit}
 .logout-button{border:0;border-left:1px solid #ece7ef;background:transparent;color:#716a79;font:inherit;font-size:10px;padding:5px 0 5px 12px;cursor:pointer}.logout-button:hover{color:#17131b}
+.source-cell{display:flex;flex-direction:column;gap:4px}.source-cell small,.field-help{color:#9a949f;font-size:9px;line-height:1.4}.field-help{display:block;margin-top:-5px}
