@@ -20,6 +20,7 @@ export type TrendSignal = {
   category: string
   source: string
   url: string
+  discoveryQuery?: string
   country: string
   season: string
   keywords: string[]

@@ -54,17 +54,35 @@ async function askOpenAI<T>(prompt: string): Promise<T | null> {
 }
 
 export async function discoverGoogleNews(product: ProductConfig): Promise<TrendSignal[]> {
-  const query = encodeURIComponent(product.searchQuery || `${product.name} ${product.audience.join(' ')} ${product.description}`)
-  const response = await fetchWithTimeout(`https://news.google.com/rss/search?q=${query}&hl=en-US&gl=${product.country}&ceid=${product.country}:en`)
-  if (!response.ok) throw new Error(`Google News RSS request failed with ${response.status}`)
-  const xml = await response.text()
-  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 12)
-  const signals = items.map((match, index) => {
-    const item = match[1]
-    const title = decodeXml(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? `Fashion resale signal ${index + 1}`)
-    const url = decodeXml(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '')
-    const source = decodeXml(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? 'Google News')
-    return { topic: title.split(' - ')[0].trim(), category: 'fashion resale', source, url, country: product.country, season: currentSeason(), keywords: title.toLowerCase().split(/\W+/).filter(Boolean).slice(0, 8), evidence: title }
+  const queries = [
+    { category: 'market momentum', query: `${product.audience[0] || 'Vinted sellers'} resale trends` },
+    { category: 'pricing', query: 'Vinted seller pricing demand resale fashion' },
+    { category: 'seasonality and sourcing', query: 'second hand fashion seasonal demand sourcing' },
+    { category: 'inventory and margins', query: 'resale fashion inventory margins sell through' },
+    ...(product.searchQuery ? [{ category: 'custom signal', query: product.searchQuery }] : []),
+  ]
+  const language = product.language || 'en'
+  const feeds = (await Promise.all(queries.map(async ({ category, query: rawQuery }) => {
+    try {
+      const query = encodeURIComponent(rawQuery)
+      const response = await fetchWithTimeout(`https://news.google.com/rss/search?q=${query}&hl=${language}&gl=${product.country}&ceid=${product.country}:${language}`)
+      if (!response.ok) throw new Error(`Google News RSS request failed with ${response.status}`)
+      return { category, query: rawQuery, xml: await response.text() }
+    } catch (error) {
+      console.warn(error instanceof Error ? error.message : `Discovery query failed: ${rawQuery}`)
+      return null
+    }
+  }))).filter((feed): feed is { category: string; query: string; xml: string } => feed !== null)
+  if (!feeds.length) throw new Error('All market signal queries failed')
+  const signals = feeds.flatMap(({ category, query, xml }) => {
+    const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 8)
+    return items.map((match, index) => {
+      const item = match[1]
+      const title = decodeXml(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? `Fashion resale signal ${index + 1}`)
+      const url = decodeXml(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '')
+      const source = decodeXml(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? 'Google News')
+      return { topic: title.split(' - ')[0].trim(), category, source, url, discoveryQuery: query, country: product.country, season: currentSeason(), keywords: title.toLowerCase().split(/\W+/).filter(Boolean).slice(0, 8), evidence: title }
+    })
   })
   const seen = new Set<string>()
   return signals.filter((signal) => {
