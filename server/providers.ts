@@ -63,7 +63,9 @@ async function askOpenAI<T>(prompt: string, operation: 'evaluation' | 'generatio
       return null
     }
     const payload = await response.json() as OpenAIResponse
-    const text = payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('')
+    const outputText = typeof payload.output_text === 'string' ? payload.output_text.trim() : ''
+    const nestedText = payload.output?.flatMap((item) => item.content ?? []).map((item) => typeof item.text === 'string' ? item.text : '').join('').trim() || ''
+    const text = outputText || nestedText
     if (!text) {
       openAIHealthy = false
       lastProvider = 'mock'
