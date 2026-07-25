@@ -58,3 +58,29 @@ export type FunnelEvent = LeadAttribution & {
   sessionId?: string
   path?: string
 }
+
+export type DashboardTrend = TrendSignal & Evaluation & {
+  id: string
+  status: 'discovered' | 'approved' | 'rejected' | 'review'
+  discoveredAt: string
+}
+
+export type QueueItem = {
+  id: string
+  campaignId?: string
+  platform: string
+  scheduledFor: string
+  status: 'queued' | 'published' | 'failed'
+  attempts: number
+  externalId?: string
+  lastError?: string
+}
+
+export type DashboardSnapshot = {
+  trends: DashboardTrend[]
+  campaigns: Campaign[]
+  queue: QueueItem[]
+  leads: Array<{ email: string; source?: string; createdAt: string }>
+  funnel: { pageViews: number; signups: number }
+  jobs: Array<{ workflow: string; status: string; startedAt: string; finishedAt?: string; error?: string }>
+}
