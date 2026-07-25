@@ -15,6 +15,7 @@ services:
       PRODUCT_URL: ${PRODUCT_URL:-https://example.com}
       PRODUCT_DESCRIPTION: ${PRODUCT_DESCRIPTION:-A SaaS product for operators who want better market signals.}
       PRODUCT_AUDIENCE: ${PRODUCT_AUDIENCE:-Vinted sellers, clothing resellers, vintage sellers}
+      PRODUCT_LANGUAGE: ${PRODUCT_LANGUAGE:-pl}
       PRODUCT_CTA: ${PRODUCT_CTA:-Join the waitlist for early access.}
       PRODUCT_COUNTRY: ${PRODUCT_COUNTRY:-PL}
     depends_on:

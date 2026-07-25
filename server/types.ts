@@ -3,6 +3,7 @@ export type ProductConfig = {
   url: string
   description: string
   audience: string[]
+  language: string
   callToAction: string
   country: string
   searchQuery?: string

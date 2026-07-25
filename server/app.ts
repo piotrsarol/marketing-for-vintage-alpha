@@ -23,6 +23,7 @@ const defaultProduct: ProductConfig = {
   url: process.env.PRODUCT_URL || 'https://example.com',
   description: process.env.PRODUCT_DESCRIPTION || 'A SaaS product for operators who want better market signals.',
   audience: (process.env.PRODUCT_AUDIENCE || 'Vinted sellers, clothing resellers, vintage sellers').split(',').map((item) => item.trim()),
+  language: process.env.PRODUCT_LANGUAGE || 'pl',
   callToAction: process.env.PRODUCT_CTA || 'Join the waitlist for early access.',
   country: process.env.PRODUCT_COUNTRY || 'PL',
   searchQuery: process.env.PRODUCT_SEARCH_QUERY || undefined,
