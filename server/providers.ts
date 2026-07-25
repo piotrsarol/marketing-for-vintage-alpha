@@ -90,13 +90,21 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
     return items.map((match, index) => {
       const item = match[1]
       const title = decodeXml(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? `Fashion resale signal ${index + 1}`)
+      const description = decodeXml(item.match(/<description>([\s\S]*?)<\/description>/)?.[1] ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
       const url = decodeXml(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '')
       const source = decodeXml(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? 'Google News')
-      return { topic: title.split(' - ')[0].trim(), category, source, url, discoveryQuery: query, country: product.country, season: currentSeason(), keywords: title.toLowerCase().split(/\W+/).filter(Boolean).slice(0, 8), evidence: title }
+      return { topic: title.split(' - ')[0].trim(), category, source, url, discoveryQuery: query, country: product.country, season: currentSeason(), keywords: `${title} ${description}`.toLowerCase().split(/\W+/).filter(Boolean).slice(0, 8), evidence: `${title}${description ? ` — ${description}` : ''}` }
     })
   })
+  const signalTerms = /\b(trend|trends|demand|popular|popularity|growth|growing|price|pricing|sales|selling|sell-through|inventory|sourcing|resale|reseller|second-hand|category|popyt|popularn|rośnie|wzrost|cena|ceny|sprzedaż|sprzedają|zapas|zatowarowanie|odsprzedaż|kategoria|marża)\b/i
+  const sellerContextTerms = /\b(vinted|resale|reseller|second-hand|fashion|clothing|sneaker|vintage|odzież|ubrania|buty|moda|vintage|sprzedawc)\b/i
+  const politicalTerms = /\b(politic|political|government|minister|election|sejm|rząd|polityk|polityka|wybory|wojna|felieton|opinia|opinion)\b/i
+  const relevant = signals.filter((signal) => {
+    const evidence = `${signal.evidence} ${signal.source}`
+    return sellerContextTerms.test(evidence) && signalTerms.test(evidence) && !(politicalTerms.test(evidence) && !/\b(resale|second-hand|fashion|clothing|sneaker|odzież|ubrania|buty|moda)\b/i.test(evidence))
+  })
   const seen = new Set<string>()
-  return signals.filter((signal) => {
+  return relevant.filter((signal) => {
     const key = normalizeTrendTopic(signal.topic)
     if (seen.has(key)) return false
     seen.add(key)
@@ -118,7 +126,7 @@ function currentSeason() {
 }
 
 export async function evaluateTrend(signal: TrendSignal, product: ProductConfig): Promise<Evaluation> {
-  const result = await askOpenAI<Evaluation>(`Evaluate this fashion resale trend for the product below. Return JSON only with numeric 0-100 fields score, virality, commercialIntent, novelty, evergreenScore, vintedRelevance, predictedEngagement and arrays contentAngles, hooks, targetAudience plus reasoning string. Write all natural-language fields in ${product.language}.\nProduct: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}`)
+  const result = await askOpenAI<Evaluation>(`Evaluate whether this is an actionable market signal for a product that predicts what will grow on Vinted. Ignore political, celebrity, opinion, brand-news, or general culture stories unless they contain concrete evidence about seller demand, product categories, prices, sales, inventory, sourcing, or resale growth. Score irrelevant stories below 50. Return JSON only with numeric 0-100 fields score, virality, commercialIntent, novelty, evergreenScore, vintedRelevance, predictedEngagement and arrays contentAngles, hooks, targetAudience plus reasoning string. Write all natural-language fields in ${product.language}.\nProduct: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}`)
   if (result) return { ...result, score: numberInRange(result.score, 70) }
   const score = Math.min(96, 62 + signal.keywords.length * 4)
   return { score, virality: score - 3, commercialIntent: score + 2, novelty: score - 8, evergreenScore: score - 15, vintedRelevance: score + 1, predictedEngagement: score - 2, reasoning: `Fallback scoring used because OPENAI_API_KEY is not configured. Evidence: ${signal.evidence}`, contentAngles: ['early demand signal', 'how to source before saturation'], hooks: [`The next resale signal may already be in your feed: ${signal.topic}.`], targetAudience: product.audience }
