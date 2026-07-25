@@ -124,9 +124,11 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
   const sellerContextTerms = /\b(vinted|resale|reseller|second-hand|fashion|clothing|sneaker|vintage|odzież|ubrania|buty|moda|vintage|sprzedawc)\b/i
   const politicalTerms = /\b(politic|political|government|minister|election|sejm|rząd|polityk|polityka|wybory|wojna|felieton|opinia|opinion)\b/i
   const genericAdviceTerms = /\b(how to|ways to|tips|guide|increase sales|jak zwiększyć sprzedaż|poradnik|sposobów)\b/i
+  const genericBusinessTerms = /\b(inventory management|business management|guess work|ceo|founder|interview|company strategy|zarządzanie inventory|zarządzanie zapasami|wywiad|strategia firmy)\b/i
+  const concreteOpportunityTerms = /\b(rising|surge|spike|trending|most searched|sold out|selling fast|demand for|resale value|price increase|search interest|rośnie|wzrost|trend|popularn|wyszukiw|wyprzed|popyt na|cena rośnie)\b/i
   const relevant = signals.filter((signal) => {
     const evidence = `${signal.evidence} ${signal.source}`
-    return sellerContextTerms.test(evidence) && signalTerms.test(evidence) && trendEvidenceTerms.test(evidence) && !(genericAdviceTerms.test(evidence) && !trendEvidenceTerms.test(signal.topic)) && !(politicalTerms.test(evidence) && !/\b(resale|second-hand|fashion|clothing|sneaker|odzież|ubrania|buty|moda)\b/i.test(evidence))
+    return sellerContextTerms.test(evidence) && signalTerms.test(evidence) && trendEvidenceTerms.test(evidence) && concreteOpportunityTerms.test(evidence) && !genericBusinessTerms.test(evidence) && !(genericAdviceTerms.test(evidence) && !trendEvidenceTerms.test(signal.topic)) && !(politicalTerms.test(evidence) && !/\b(resale|second-hand|fashion|clothing|sneaker|odzież|ubrania|buty|moda)\b/i.test(evidence))
   })
   const seen = new Set<string>()
   return relevant.filter((signal) => {
