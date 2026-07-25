@@ -81,6 +81,10 @@ export type DashboardSnapshot = {
   campaigns: Campaign[]
   queue: QueueItem[]
   leads: Array<{ email: string; source?: string; createdAt: string }>
-  funnel: { pageViews: number; signups: number }
+  funnel: {
+    pageViews: number
+    signups: number
+    campaigns: Array<{ campaign: string; pageViews: number; signups: number }>
+  }
   jobs: Array<{ workflow: string; status: string; startedAt: string; finishedAt?: string; error?: string }>
 }
