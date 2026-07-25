@@ -4,7 +4,7 @@ import { discoverMarketplaceSignals } from './marketplace.js'
 type OpenAIResponse = { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }
 let openAIHealthy = false
 let lastProvider: 'openai' | 'mock' | 'unknown' = 'unknown'
-let lastProviderError: 'not_configured' | 'http_error' | 'empty_response' | 'invalid_json' | 'network_or_timeout' | null = null
+let lastProviderError: 'not_configured' | 'unauthorized' | 'rate_limited' | 'http_error' | 'empty_response' | 'invalid_json' | 'network_or_timeout' | null = null
 let lastProviderOperation: 'evaluation' | 'generation' | 'unknown' = 'unknown'
 const providerTimeoutMs = 15_000
 
@@ -58,7 +58,7 @@ async function askOpenAI<T>(prompt: string, operation: 'evaluation' | 'generatio
     if (!response.ok) {
       openAIHealthy = false
       lastProvider = 'mock'
-      lastProviderError = 'http_error'
+      lastProviderError = response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'rate_limited' : 'http_error'
       console.warn(`OpenAI request failed with ${response.status}; using the local fallback provider.`)
       return null
     }

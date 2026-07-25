@@ -209,6 +209,15 @@ export async function finishJobRun(id: string, status: 'succeeded' | 'failed', o
   await writeCollection('job-runs', jobs.map((job) => job.id === id ? { ...job, status, output, error, finishedAt } : job))
 }
 
+export async function latestJobRun(workflow: string) {
+  if (storageProvider === 'supabase') {
+    const rows = await supabaseRequest<Array<{ output?: unknown; status: string; finished_at?: string }>>(`job_runs?workflow=eq.${encodeURIComponent(workflow)}&select=output,status,finished_at&order=started_at.desc&limit=1`)
+    return rows[0]
+  }
+  const rows = await readCollection<{ workflow: string; output?: unknown; status: string; finishedAt?: string }>('job-runs')
+  return rows.filter((run) => run.workflow === workflow)[0]
+}
+
 export async function saveLead(email: string, attribution: LeadAttribution) {
   if (storageProvider === 'supabase') {
     try {
