@@ -2,6 +2,17 @@ import type { Evaluation, ProductConfig, TrendSignal } from './types.js'
 
 type OpenAIResponse = { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }
 let openAIHealthy = false
+const providerTimeoutMs = 15_000
+
+async function fetchWithTimeout(input: string, init?: RequestInit) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), providerTimeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 export function currentProvider(): 'openai' | 'mock' {
   return openAIHealthy ? 'openai' : 'mock'
@@ -20,7 +31,7 @@ async function askOpenAI<T>(prompt: string): Promise<T | null> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) { openAIHealthy = false; return null }
   try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5-mini', input: prompt, text: { format: { type: 'json_object' } } }),
@@ -44,7 +55,7 @@ async function askOpenAI<T>(prompt: string): Promise<T | null> {
 
 export async function discoverGoogleNews(product: ProductConfig): Promise<TrendSignal[]> {
   const query = encodeURIComponent(product.searchQuery || `${product.name} ${product.audience.join(' ')} ${product.description}`)
-  const response = await fetch(`https://news.google.com/rss/search?q=${query}&hl=en-US&gl=${product.country}&ceid=${product.country}:en`)
+  const response = await fetchWithTimeout(`https://news.google.com/rss/search?q=${query}&hl=en-US&gl=${product.country}&ceid=${product.country}:en`)
   if (!response.ok) throw new Error(`Google News RSS request failed with ${response.status}`)
   const xml = await response.text()
   const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 12)
