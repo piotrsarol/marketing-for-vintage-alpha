@@ -40,6 +40,11 @@ function median(values: number[]) {
   return sorted[Math.floor(sorted.length / 2)] || 0
 }
 
+function cleanTopic(value: string | undefined, fallback: string) {
+  const topic = (value || '').replace(/\bunknown\b/gi, '').replace(/\s+/g, ' ').trim()
+  return topic || fallback
+}
+
 export async function discoverMarketplaceSignals(product: ProductConfig): Promise<TrendSignal[]> {
   if (!process.env.SCRAPPA_API_KEY) return []
   const queries = product.searchQuery && !/seller|trend|demand|resale|fashion/i.test(product.searchQuery)
@@ -53,7 +58,7 @@ export async function discoverMarketplaceSignals(product: ProductConfig): Promis
     const topItem = items.slice().sort((a, b) => (b.favourite_count || 0) - (a.favourite_count || 0))[0]
     const evidence = `${items.length} active listings, median asking price ${median(prices)} ${currency}, average favourites ${Math.round(favourites.reduce((sum, value) => sum + value, 0) / items.length)}, top listing ${topItem?.favourite_count || 0} favourites. This is a live marketplace demand proxy, not confirmed sales data.`
     return {
-      topic: topItem?.title || query,
+      topic: cleanTopic(topItem?.title, query),
       category: 'marketplace product demand',
       source: 'Scrappa · Vinted marketplace',
       url: topItem?.url || '',
