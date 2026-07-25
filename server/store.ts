@@ -33,8 +33,8 @@ async function supabaseRequest<T>(resource: string, init?: RequestInit): Promise
     headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
   if (!response.ok) throw new Error(`Supabase request failed with ${response.status}: ${await response.text()}`)
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const text = await response.text()
+  return text ? JSON.parse(text) as T : undefined as T
 }
 
 export async function saveCampaign(campaign: Campaign) {
@@ -44,6 +44,7 @@ export async function saveCampaign(campaign: Campaign) {
       return campaign
     } catch (error) {
       console.warn(error instanceof Error ? error.message : 'Supabase campaign write failed; using local storage.')
+      if (process.env.NODE_ENV === 'production') throw error
     }
   }
   const campaigns = await readCollection<Campaign>('campaigns')
@@ -58,6 +59,7 @@ export async function latestCampaigns() {
       return records.map((record) => record.payload)
     } catch (error) {
       console.warn(error instanceof Error ? error.message : 'Supabase campaign read failed; using local storage.')
+      if (process.env.NODE_ENV === 'production') throw error
     }
   }
   return readCollection<Campaign>('campaigns')
@@ -66,10 +68,11 @@ export async function latestCampaigns() {
 export async function saveLead(email: string, source: string) {
   if (storageProvider === 'supabase') {
     try {
-      await supabaseRequest('waitlist_leads', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ email, source }) })
+      await supabaseRequest('waitlist_leads?on_conflict=email', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ email, source }) })
       return { email, source }
     } catch (error) {
       console.warn(error instanceof Error ? error.message : 'Supabase lead write failed; using local storage.')
+      if (process.env.NODE_ENV === 'production') throw error
     }
   }
   const leads = await readCollection<{ email: string; source: string; createdAt: string }>('leads')

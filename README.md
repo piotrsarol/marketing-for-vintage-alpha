@@ -44,6 +44,28 @@ When `SUPABASE_URL` and the server-only `SUPABASE_SERVICE_ROLE_KEY` are set, cam
 
 For a live deployment, apply [`database/schema.sql`](./database/schema.sql) to the Supabase SQL editor, then configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment. The service-role key must remain server-side; the API health response reports `storage: "supabase"` when the connection is configured.
 
+### Vercel deployment
+
+Vercel serves the Vite frontend and the `api/[[...path]].ts` serverless function together. Configure these project environment variables in Vercel for **Production** and **Preview** as appropriate:
+
+```env
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5-mini
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=
+ADMIN_API_TOKEN=
+ALLOWED_ORIGIN=https://<your-project>.vercel.app
+PRODUCT_NAME=
+PRODUCT_URL=
+PRODUCT_DESCRIPTION=
+PRODUCT_AUDIENCE=
+PRODUCT_CTA=
+PRODUCT_COUNTRY=PL
+PRODUCT_SEARCH_QUERY=
+```
+
+Generate `ADMIN_API_TOKEN` with `openssl rand -hex 32`. Keep it out of `VITE_*` variables and source code. `/api/health` and `/api/waitlist` are public; campaign discovery, execution, and stored-campaign reads require `Authorization: Bearer <ADMIN_API_TOKEN>`. Supabase tables have RLS enabled and are accessed only by the server-side service-role key.
+
 ## Run with Docker
 
 ```bash
