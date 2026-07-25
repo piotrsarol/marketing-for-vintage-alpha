@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent, normalizeTrendTopic } from './providers.js'
+import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
@@ -301,7 +301,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       return json(response, 200, {
         product,
         updatedAt: stored.updatedAt,
-        ai: { provider: currentProvider(), model: process.env.OPENAI_MODEL || 'gpt-5-mini' },
+        ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
