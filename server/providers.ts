@@ -93,6 +93,9 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
     { category: 'pricing', query: 'Vinted seller pricing demand resale fashion' },
     { category: 'seasonality and sourcing', query: 'second hand fashion seasonal demand sourcing' },
     { category: 'inventory and margins', query: 'resale fashion inventory margins sell through' },
+    { category: 'product demand', query: 'Vinted sneakers rising demand resale' },
+    { category: 'product demand', query: 'Vinted denim jackets bags rising trend resale' },
+    { category: 'product demand', query: 'second hand fashion products gaining popularity' },
     ...(product.searchQuery ? [{ category: 'custom signal', query: product.searchQuery }] : []),
   ]
   const language = product.language || 'en'
