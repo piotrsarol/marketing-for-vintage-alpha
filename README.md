@@ -53,6 +53,7 @@ Vercel serves the Vite frontend and explicit serverless functions under `api/` t
 ```env
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-mini
+SCRAPPA_API_KEY=
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=
 ADMIN_API_TOKEN=
@@ -68,6 +69,8 @@ PRODUCT_SEARCH_QUERY=
 ```
 
 `PRODUCT_LANGUAGE` controls the language of AI reasoning and generated campaign copy. Set it to `en` for English campaigns; for a Polish Vinted-seller audience, `pl` is the recommended validation default. Google News discovery is deduplicated by normalized topic before scoring, so one repeated article cannot create multiple campaigns in a single run.
+
+`SCRAPPA_API_KEY` enables live Vinted marketplace discovery through Scrappa. The provider returns active listing counts, asking-price medians, and favourites as a demand proxy; it does not prove completed sales. Use repeated snapshots before treating listing disappearance as a sales-velocity estimate.
 
 The dashboard uses a Supabase Auth user rather than a browser token. In the Supabase project, open **Authentication → Users → Add user**, create the operator email/password, then set `ADMIN_EMAIL` in Vercel Production to the same email. Content Studio exchanges the email/password for a server-side HttpOnly session cookie; the Supabase service-role key remains server-only. Direct automation callers may still use `Authorization: Bearer <ADMIN_API_TOKEN>`, but it is not needed for normal dashboard use.
 
