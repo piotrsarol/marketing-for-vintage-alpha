@@ -3,7 +3,8 @@ import path from 'node:path'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
-import { latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, storageProvider } from './store.js'
+import { currentPublisher, publishQueuedItem } from './publishers.js'
+import { dashboardSnapshot, latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, saveQueueItems, saveTrend, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -174,6 +175,7 @@ async function runCampaign(product: ProductConfig) {
   const discovered = await discoverGoogleNews(product)
   const evaluated = await Promise.all(discovered.slice(0, 6).map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
   const approved = evaluated.filter((item) => item.evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70)).slice(0, 3)
+  await Promise.all(evaluated.map(({ trend, evaluation }) => saveTrend(trend, evaluation, evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70) ? 'approved' : 'review')))
   const campaigns: Campaign[] = []
   const generated = await Promise.all(approved.map(async ({ trend, evaluation }) => {
     const campaignId = randomUUID()
@@ -190,7 +192,9 @@ async function runCampaign(product: ProductConfig) {
     return { id: campaignId, product, trend, evaluation, content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }, provider: currentProvider(), createdAt: new Date().toISOString() } satisfies Campaign
   }))
   for (const campaign of generated) {
-    campaigns.push(await saveCampaign(campaign))
+    const saved = await saveCampaign(campaign)
+    await saveQueueItems(saved.id, ['linkedin', 'instagram', 'tiktok', 'youtube', 'pinterest', 'email'])
+    campaigns.push(saved)
   }
   return { discovered: discovered.length, approved: approved.length, campaigns }
 }
@@ -203,7 +207,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (request.method === 'OPTIONS') return json(response, 204, null)
-    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: currentProvider(), storage: storageProvider, time: new Date().toISOString() })
+    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: currentProvider(), publisher: currentPublisher(), storage: storageProvider, time: new Date().toISOString() })
     if (url.pathname === '/api/admin/login' && request.method === 'POST') {
       const input = await body(request)
       if (typeof input.token !== 'string' || !safeEqual(process.env.ADMIN_API_TOKEN || '', input.token)) return json(response, 401, { error: 'Invalid admin token' })
@@ -243,6 +247,40 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === defaultProduct.name)
       return json(response, 200, { campaigns })
+    }
+    if (url.pathname === '/api/dashboard' && request.method === 'GET') {
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const fullSnapshot = await dashboardSnapshot()
+      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === defaultProduct.name)
+      const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
+      return json(response, 200, snapshot)
+    }
+    if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process') && request.method === 'POST') {
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const fullSnapshot = await dashboardSnapshot()
+      const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === defaultProduct.name)
+      const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
+      const input = await body(request)
+      const requestedIds = url.pathname.endsWith('/publish') && typeof input.queueId === 'string' ? [input.queueId] : snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() <= Date.now()).map((item) => item.id)
+      const results = []
+      for (const queueId of requestedIds) {
+        const item = snapshot.queue.find((candidate) => candidate.id === queueId)
+        const campaign = item?.campaignId ? snapshot.campaigns.find((candidate) => candidate.id === item.campaignId) : undefined
+        if (!item || !campaign) {
+          results.push({ queueId, status: 'failed', error: 'Campaign payload is not available for this queue item.' })
+          continue
+        }
+        try {
+          const published = await publishQueuedItem(item, campaign)
+          await updateQueueItem(item.id, { status: 'published', attempts: item.attempts + 1, externalId: published.externalId, lastError: undefined })
+          results.push({ queueId, status: 'published', externalId: published.externalId })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Publishing failed'
+          await updateQueueItem(item.id, { status: 'failed', attempts: item.attempts + 1, lastError: message })
+          results.push({ queueId, status: 'failed', error: message })
+        }
+      }
+      return json(response, 200, { publisher: currentPublisher(), results })
     }
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       if (!consumeRateLimit(`waitlist:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
