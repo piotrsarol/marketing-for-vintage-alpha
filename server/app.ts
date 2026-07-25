@@ -189,7 +189,22 @@ async function runCampaign(product: ProductConfig) {
       link.searchParams.set('utm_content', campaignId)
       return [channel, link.toString()]
     }))
-    return { id: campaignId, product, trend, evaluation, content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }, provider: currentProvider(), createdAt: new Date().toISOString() } satisfies Campaign
+    return {
+      id: campaignId,
+      product,
+      trend,
+      evaluation,
+      strategy: {
+        objective: 'waitlist_signups',
+        hypothesis: `Vinted sellers will join early access if shown how ${evaluation.contentAngles[0] || 'this market signal'} can improve sourcing decisions.`,
+        angle: evaluation.contentAngles[0] || 'data-led sourcing',
+        primaryChannel: 'linkedin',
+        successMetric: 'landing_page_conversion',
+      },
+      content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } },
+      provider: currentProvider(),
+      createdAt: new Date().toISOString(),
+    } satisfies Campaign
   }))
   for (const campaign of generated) {
     const saved = await saveCampaign(campaign)

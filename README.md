@@ -95,6 +95,15 @@ The application currently has a **transport seam**, not a connected social accou
 
 The endpoint must perform the real platform publish and return a 2xx response. It can be an n8n webhook that routes to Buffer or native platform nodes. Without it, the dashboard keeps queue items un-published and reports that no provider is configured; it never claims a post was sent.
 
+The repository includes `automation/vinted-publisher-dispatcher.json` for the n8n side:
+
+1. Import and activate the workflow in n8n.
+2. Set `PUBLISH_LINKEDIN_URL`, `PUBLISH_INSTAGRAM_URL`, `PUBLISH_TIKTOK_URL`, `PUBLISH_YOUTUBE_URL`, and `PUBLISH_PINTEREST_URL` in n8n to secured Buffer/native-adapter endpoints.
+3. Set Vercel `PUBLISH_WEBHOOK_URL` to the n8n production webhook URL ending in `/webhook/vinted-publisher`.
+4. Use the dashboard queue action; the app sends the asset to n8n, n8n selects the platform adapter, and a successful 2xx response marks the queue item as published.
+
+This dispatcher is the connector layer. It does not contain social credentials and it does not fake platform publishing; each channel URL must be backed by a real Buffer/native API node or workflow.
+
 ## Architecture
 
 ```mermaid
