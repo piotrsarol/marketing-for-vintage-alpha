@@ -2,6 +2,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/auth/login", "destination": "/api/auth-login" },
+    { "source": "/api/auth/logout", "destination": "/api/auth-logout" },
+    { "source": "/api/admin/session", "destination": "/api/admin-session" },
     { "source": "/api/campaigns/latest", "destination": "/api/campaigns-latest" },
     { "source": "/api/campaigns/run", "destination": "/api/campaigns-run" },
     { "source": "/api/trends/discover", "destination": "/api/trends-discover" }
