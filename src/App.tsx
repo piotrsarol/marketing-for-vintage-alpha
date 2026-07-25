@@ -26,7 +26,8 @@ function App() {
   const [notice, setNotice] = useState('')
   const [running, setRunning] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
-  const [adminToken, setAdminToken] = useState('')
+  const [adminEmail, setAdminEmail] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
   const [adminError, setAdminError] = useState('')
   const [campaigns, setCampaigns] = useState<LiveCampaign[]>([])
   const [trendFilter, setTrendFilter] = useState('All sources')
@@ -85,17 +86,18 @@ function App() {
   async function loginAdmin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAdminError('')
-    const response = await fetch('/api/admin/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: adminToken }) })
+    const response = await fetch('/api/auth/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: adminEmail, password: adminPassword }) })
     if (!response.ok) {
-      setAdminError('Invalid admin token.')
+      const result = await response.json().catch(() => ({})) as { error?: string }
+      setAdminError(result.error || 'Invalid email or password.')
       return
     }
-    setAdminToken('')
+    setAdminPassword('')
     setAuthenticated(true)
     await loadLatestCampaigns()
   }
   async function logoutAdmin() {
-    await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' })
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
     setAuthenticated(false)
     setCampaigns([])
   }
@@ -110,7 +112,7 @@ function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
       {view === 'overview' && <Overview onExplore={() => setView('trends')} />}
       {view === 'trends' && <section className="page-section"><PageIntro eyebrow="DEMAND VALIDATION" title="Trend radar" description="Every signal is scored for momentum, commercial intent, and relevance to Vinted sellers." action={<button className="primary-button" onClick={() => setNotice('Discovery run queued for the next available worker.')}>Run discovery <span>↗</span></button>} /><div className="filter-row"><div className="tabs"><button className="active">All signals <span>24</span></button><button>Approved <span>18</span></button><button>Needs review <span>6</span></button></div><select value={trendFilter} onChange={(event) => setTrendFilter(event.target.value)}><option>All sources</option><option>Google Trends</option><option>Pinterest</option><option>Reddit</option><option>RSS</option></select></div><TrendTable data={filteredTrends} /></section>}
-      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Run the real campaign engine here. Generated content and tracked landing links stay behind the admin session." action={authenticated ? <><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></> : undefined} />{authenticated ? <LiveCampaigns campaigns={campaigns} /> : <AdminLogin token={adminToken} error={adminError} onTokenChange={setAdminToken} onSubmit={loginAdmin} />}</section>}
+      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Sign in once, then run the AI campaign engine from this dashboard." action={authenticated ? <><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></> : undefined} />{authenticated ? <LiveCampaigns campaigns={campaigns} /> : <AdminLogin email={adminEmail} password={adminPassword} error={adminError} onEmailChange={setAdminEmail} onPasswordChange={setAdminPassword} onSubmit={loginAdmin} />}</section>}
       {view === 'queue' && <section className="page-section"><PageIntro eyebrow="DISTRIBUTION" title="Publishing queue" description="Your approved content is queued across channels with built-in retry handling." action={<button className="secondary-button" onClick={() => setNotice('Queue exported as CSV.')}>Export queue</button>} /><div className="queue-list">{queue.map((item) => <div className="queue-item" key={item.title}><div className={`social-icon ${item.color}`}>{item.icon}</div><div className="queue-copy"><b>{item.title}</b><span>{item.platform} · {item.time}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status}</span><button className="more">•••</button></div>)}</div></section>}
       {view === 'leads' && <section className="page-section"><PageIntro eyebrow="DEMAND SIGNAL" title="Waitlist" description="Capture early interest before launch and understand which content turns into qualified demand." action={<button className="secondary-button" onClick={() => setNotice('CSV export prepared.')}>Export leads</button>} /><div className="lead-layout"><div className="lead-card"><span className="eyebrow">TOTAL SIGNUPS</span><strong>248</strong><span className="positive">↑ 24% this week</span><div className="sparkline">{Array.from({ length: 11 }, (_, index) => <i key={index} />)}</div></div><div className="lead-card"><span className="eyebrow">CONVERSION RATE</span><strong>6.8%</strong><span className="positive">↑ 1.2 pts this week</span><div className="conversion-bar"><span /></div><small>Landing page visitors · 3,647</small></div></div><div className="lead-table"><div className="table-heading"><span>Recent signups</span><span>Source</span><span>Joined</span></div>{['anna@vintageclub.co', 'milo.resells@gmail.com', 'hello@retro-room.com', 'kasia.thrift@gmail.com'].map((lead, index) => <div className="table-row" key={lead}><b>{lead}</b><span>{['Instagram', 'Google', 'TikTok', 'Pinterest'][index]}</span><span>Today, {['14:32', '12:08', '10:41', '09:16'][index]}</span></div>)}</div></section>}
       {notice && <button className="toast" onClick={() => setNotice('')}>{notice} <span>×</span></button>}
@@ -119,8 +121,8 @@ function App() {
   </div>
 }
 
-function AdminLogin({ token, error, onTokenChange, onSubmit }: { token: string; error: string; onTokenChange: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="studio-preview"><div><span className="eyebrow">OPERATOR ACCESS</span><h2>Sign in to run campaigns</h2><p>Your admin token is used only to create an encrypted session cookie. It is never stored in the browser or exposed to the API response.</p><form onSubmit={onSubmit}><input aria-label="Admin token" type="password" placeholder="Admin API token" value={token} onChange={(event) => onTokenChange(event.target.value)} required /><button className="primary-button" type="submit">Sign in <span>↗</span></button></form>{error && <small>{error}</small>}</div></div>
+function AdminLogin({ email, password, error, onEmailChange, onPasswordChange, onSubmit }: { email: string; password: string; error: string; onEmailChange: (value: string) => void; onPasswordChange: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="studio-preview"><div><span className="eyebrow">OPERATOR ACCESS</span><h2>Sign in to run campaigns</h2><p>Use your Supabase account. The dashboard keeps the session in a secure HttpOnly cookie; no API token is needed.</p><form onSubmit={onSubmit}><input aria-label="Admin email" type="email" placeholder="Email address" value={email} onChange={(event) => onEmailChange(event.target.value)} required /><input aria-label="Admin password" type="password" placeholder="Password" value={password} onChange={(event) => onPasswordChange(event.target.value)} required /><button className="primary-button" type="submit">Sign in <span>↗</span></button></form>{error && <small>{error}</small>}</div></div>
 }
 
 function LiveCampaigns({ campaigns }: { campaigns: LiveCampaign[] }) {

@@ -12,6 +12,10 @@ const rateWindowMs = 15 * 60 * 1000
 const rateLimit = new Map<string, { count: number; resetAt: number }>()
 const adminCookieName = 'vinted_admin_session'
 const adminSessionMaxAge = 60 * 60 * 8
+const supabaseCookieName = 'vinted_supabase_session'
+const supabaseSessionMaxAge = 60 * 60 * 24 * 7
+const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const defaultProduct: ProductConfig = {
   name: process.env.PRODUCT_NAME || 'Your SaaS product',
@@ -88,6 +92,55 @@ function hasSession(request: IncomingMessage) {
   return Number.isSafeInteger(expiresAt) && expiresAt > Math.floor(Date.now() / 1000) && safeEqual(signature || '', sessionSignature(expiresAt))
 }
 
+function encodeCookiePayload(value: unknown) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url')
+}
+
+function decodeCookiePayload<T>(value: string) {
+  try {
+    return JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as T
+  } catch {
+    return null
+  }
+}
+
+function supabaseCookieSecret() {
+  return supabaseKey || process.env.ADMIN_API_TOKEN || ''
+}
+
+function supabaseCookie(payload: { accessToken: string; refreshToken: string; expiresAt: number }) {
+  const encoded = encodeCookiePayload(payload)
+  const signature = createHmac('sha256', supabaseCookieSecret()).update(encoded).digest('hex')
+  return `${encoded}.${signature}`
+}
+
+function supabaseSession(request: IncomingMessage) {
+  const [encoded, signature] = cookieValue(request, supabaseCookieName).split('.')
+  if (!encoded || !signature || !supabaseCookieSecret()) return null
+  const expected = createHmac('sha256', supabaseCookieSecret()).update(encoded).digest('hex')
+  if (!safeEqual(expected, signature)) return null
+  return decodeCookiePayload<{ accessToken: string; refreshToken: string; expiresAt: number }>(encoded)
+}
+
+async function supabaseAuth(pathname: string, init: RequestInit) {
+  if (!supabaseUrl || !supabaseKey) return null
+  const response = await fetch(`${supabaseUrl}/auth/v1/${pathname}`, {
+    ...init,
+    headers: { apikey: supabaseKey, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+  })
+  return response
+}
+
+async function hasSupabaseAccess(request: IncomingMessage) {
+  const session = supabaseSession(request)
+  if (!session || session.expiresAt <= Math.floor(Date.now() / 1000)) return false
+  const response = await supabaseAuth('user', { headers: { Authorization: `Bearer ${session.accessToken}` } })
+  if (!response?.ok) return false
+  const user = await response.json() as { email?: string }
+  const allowedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase()
+  return !allowedEmail || user.email?.toLowerCase() === allowedEmail
+}
+
 function consumeRateLimit(key: string, limit: number) {
   const now = Date.now()
   const current = rateLimit.get(key)
@@ -100,12 +153,14 @@ function consumeRateLimit(key: string, limit: number) {
   return true
 }
 
-function hasAdminAccess(request: IncomingMessage) {
+async function hasAdminAccess(request: IncomingMessage) {
   const configuredToken = process.env.ADMIN_API_TOKEN
+  if (configuredToken) {
+    const provided = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : ''
+    if (safeEqual(configuredToken, provided) || hasSession(request)) return true
+  }
   if (!configuredToken && process.env.NODE_ENV !== 'production') return true
-  if (!configuredToken) return false
-  const provided = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : ''
-  return safeEqual(configuredToken, provided) || hasSession(request)
+  return hasSupabaseAccess(request)
 }
 
 async function json(response: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}) {
@@ -164,19 +219,34 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (url.pathname === '/api/admin/logout' && request.method === 'POST') {
       return json(response, 200, { authenticated: false }, { 'Set-Cookie': `${adminCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === 'production' ? '; Secure' : ''}` })
     }
-    if (url.pathname === '/api/admin/session' && request.method === 'GET') return json(response, 200, { authenticated: hasAdminAccess(request) })
+    if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+      const input = await body(request)
+      if (typeof input.email !== 'string' || typeof input.password !== 'string') return json(response, 400, { error: 'Email and password are required.' })
+      const authResponse = await supabaseAuth('token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: input.email.trim().toLowerCase(), password: input.password }) })
+      if (!authResponse?.ok) return json(response, 401, { error: 'Invalid email or password.' })
+      const session = await authResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number; user?: { email?: string } }
+      if (!session.access_token || !session.refresh_token) return json(response, 401, { error: 'Supabase Auth did not return a session.' })
+      const allowedEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase()
+      if (allowedEmail && session.user?.email?.toLowerCase() !== allowedEmail) return json(response, 403, { error: 'This account is not allowed to access the operator console.' })
+      const expiresAt = Math.floor(Date.now() / 1000) + (session.expires_in || 3600)
+      return json(response, 200, { authenticated: true, user: { email: session.user?.email } }, { 'Set-Cookie': `${supabaseCookieName}=${supabaseCookie({ accessToken: session.access_token, refreshToken: session.refresh_token, expiresAt })}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${supabaseSessionMaxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}` })
+    }
+    if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+      return json(response, 200, { authenticated: false }, { 'Set-Cookie': `${supabaseCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === 'production' ? '; Secure' : ''}` })
+    }
+    if (url.pathname === '/api/admin/session' && request.method === 'GET') return json(response, 200, { authenticated: await hasAdminAccess(request) })
     if (url.pathname === '/api/trends/discover' && request.method === 'GET') {
-      if (!hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
+      if (!await hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
       if (!consumeRateLimit(`trends:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
       return json(response, 200, { trends: await discoverGoogleNews(productFrom({ country: url.searchParams.get('country') ?? undefined })) })
     }
     if (url.pathname === '/api/campaigns/run' && request.method === 'POST') {
-      if (!hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       if (!consumeRateLimit(`campaign:${clientIp(request)}`, 5)) return json(response, 429, { error: 'Rate limit exceeded' })
       return json(response, 200, await runCampaign(productFrom((await body(request)).product)))
     }
     if (url.pathname === '/api/campaigns/latest' && request.method === 'GET') {
-      if (!hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === defaultProduct.name)
       return json(response, 200, { campaigns })
     }

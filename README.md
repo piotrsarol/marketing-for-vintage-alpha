@@ -66,7 +66,7 @@ PRODUCT_COUNTRY=PL
 PRODUCT_SEARCH_QUERY=
 ```
 
-Generate `ADMIN_API_TOKEN` with `openssl rand -hex 32`. Keep it out of `VITE_*` variables and source code. `/api/health`, `/api/waitlist`, and `/api/admin/login` are public; the dashboard exchanges the token for an eight-hour HttpOnly session cookie, so campaign discovery, execution, and stored-campaign reads can be used from the browser without exposing the token to API responses. Direct API callers may still use `Authorization: Bearer <ADMIN_API_TOKEN>`. Supabase tables have RLS enabled and are accessed only by the server-side service-role key.
+The dashboard uses a Supabase Auth user rather than a browser token. In the Supabase project, open **Authentication → Users → Add user**, create the operator email/password, then set `ADMIN_EMAIL` in Vercel Production to the same email. Content Studio exchanges the email/password for a server-side HttpOnly session cookie; the Supabase service-role key remains server-only. Direct automation callers may still use `Authorization: Bearer <ADMIN_API_TOKEN>`, but it is not needed for normal dashboard use.
 
 ## Run with Docker
 
