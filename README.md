@@ -72,6 +72,8 @@ PRODUCT_SEARCH_QUERY=
 
 `SCRAPPA_API_KEY` enables live Vinted marketplace discovery through Scrappa. The provider returns active listing counts, asking-price medians, and favourites as a demand proxy; it does not prove completed sales. Use repeated snapshots before treating listing disappearance as a sales-velocity estimate.
 
+The campaign workflow now stores one `marketplace_snapshots` record per query and country on every live run. The next observation compares listing count, median price, average favourites, and disappeared listing IDs with the previous snapshot. `estimatedVelocity` is intentionally a proxy with low confidence; it is not confirmed sales data.
+
 The dashboard uses a Supabase Auth user rather than a browser token. In the Supabase project, open **Authentication → Users → Add user**, create the operator email/password, then set `ADMIN_EMAIL` in Vercel Production to the same email. Content Studio exchanges the email/password for a server-side HttpOnly session cookie; the Supabase service-role key remains server-only. Direct automation callers may still use `Authorization: Bearer <ADMIN_API_TOKEN>`, but it is not needed for normal dashboard use.
 
 ## Run with Docker

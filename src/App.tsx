@@ -3,10 +3,10 @@ import type { FormEvent, ReactNode } from 'react'
 import './App.css'
 
 type View = 'overview' | 'trends' | 'content' | 'queue' | 'leads' | 'settings'
-type Trend = { id: string; topic: string; category: string; score: number; source: string; sourceType: string; audience: string; discoveryQuery?: string; status: string; delta: string }
+type Trend = { id: string; topic: string; category: string; score: number; source: string; sourceType: string; audience: string; discoveryQuery?: string; status: string; delta: string; marketplace?: { listingCountDelta?: number; medianPriceDelta?: number; disappearedListingCount?: number; velocityConfidence?: string } }
 type LiveCampaign = { id: string; provider: 'openai' | 'mock'; trend: { topic: string }; evaluation?: { productCategory?: string; opportunityType?: string; opportunityConfidence?: number; supplyStatus?: string; recommendedAction?: string }; strategy?: { objective: string; hypothesis: string; angle: string; primaryChannel: string }; content: Record<string, unknown> }
 type DashboardData = {
-  trends: Array<{ id: string; topic: string; category: string; score: number; source: string; keywords: string[]; targetAudience: string[]; discoveryQuery?: string; status: string }>
+  trends: Array<{ id: string; topic: string; category: string; score: number; source: string; keywords: string[]; targetAudience: string[]; discoveryQuery?: string; status: string; marketplace?: Trend['marketplace'] }>
   campaigns: LiveCampaign[]
   queue: Array<{ id: string; platform: string; scheduledFor: string; status: string }>
   leads: Array<{ email: string; source?: string; createdAt: string }>
@@ -29,7 +29,7 @@ function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [settings, setSettings] = useState<SettingsData | null>(null)
   const [trendFilter, setTrendFilter] = useState('All sources')
-  const trends: Trend[] = (dashboard?.trends || []).map((trend) => ({ ...trend, sourceType: trend.source, audience: trend.targetAudience.join(', '), delta: '—' }))
+  const trends: Trend[] = (dashboard?.trends || []).map((trend) => ({ ...trend, sourceType: trend.source, audience: trend.targetAudience.join(', '), delta: trend.marketplace?.disappearedListingCount !== undefined ? `${trend.marketplace.disappearedListingCount} disappeared` : 'snapshot 1' }))
   const filteredTrends = useMemo(() => trendFilter === 'All sources' ? trends : trends.filter((trend) => trend.sourceType === trendFilter), [trendFilter, trends])
   async function loadDashboard() {
     const response = await fetch('/api/dashboard', { credentials: 'same-origin' })

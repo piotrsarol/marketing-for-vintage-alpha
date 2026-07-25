@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Campaign, DashboardSnapshot, DashboardTrend, FunnelEvent, LeadAttribution, OperatorSettings, ProductConfig, QueueItem, TrendSignal, Evaluation } from './types.js'
+import type { MarketplaceSnapshot } from './marketplace.js'
 
 const dataDirectory = path.resolve(process.cwd(), '.data')
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
@@ -116,6 +117,7 @@ export async function saveTrend(signal: TrendSignal, evaluation: Evaluation, sta
         content_angles: trend.contentAngles,
         hooks: trend.hooks,
         target_audience: trend.targetAudience,
+        marketplace: trend.marketplace,
         status: trend.status,
         discovered_at: trend.discoveredAt,
       }) })
@@ -218,6 +220,72 @@ export async function latestJobRun(workflow: string) {
   return rows.filter((run) => run.workflow === workflow)[0]
 }
 
+export async function saveMarketplaceSnapshot(snapshot: MarketplaceSnapshot): Promise<MarketplaceSnapshot> {
+  let previous: MarketplaceSnapshot | undefined
+  if (storageProvider === 'supabase') {
+    const rows = await supabaseRequest<Array<{
+      id: string
+      query: string
+      country: string
+      observed_at: string
+      listing_ids: string[]
+      listing_count: number
+      median_price: number
+      currency: string
+      average_favourites: number
+      top_favourites: number
+    }>>(`marketplace_snapshots?query=eq.${encodeURIComponent(snapshot.query)}&country=eq.${encodeURIComponent(snapshot.country)}&select=*&order=observed_at.desc&limit=1`)
+    const row = rows[0]
+    if (row) previous = {
+      id: row.id,
+      query: row.query,
+      country: row.country,
+      observedAt: row.observed_at,
+      listingIds: row.listing_ids,
+      listingCount: row.listing_count,
+      medianPrice: row.median_price,
+      currency: row.currency,
+      averageFavourites: row.average_favourites,
+      topFavourites: row.top_favourites,
+    }
+  } else {
+    const rows = await readCollection<MarketplaceSnapshot>('marketplace-snapshots')
+    previous = rows.find((row) => row.query === snapshot.query && row.country === snapshot.country)
+  }
+  const enriched: MarketplaceSnapshot = {
+    ...snapshot,
+    previousObservedAt: previous?.observedAt,
+    listingCountDelta: previous ? snapshot.listingCount - previous.listingCount : undefined,
+    medianPriceDelta: previous ? Number((snapshot.medianPrice - previous.medianPrice).toFixed(2)) : undefined,
+    averageFavouritesDelta: previous ? snapshot.averageFavourites - previous.averageFavourites : undefined,
+    disappearedListingCount: previous ? previous.listingIds.filter((id) => !snapshot.listingIds.includes(id)).length : undefined,
+  }
+  if (storageProvider === 'supabase') {
+    const id = randomUUID()
+    await supabaseRequest('marketplace_snapshots', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        id,
+        query: enriched.query,
+        country: enriched.country,
+        observed_at: enriched.observedAt,
+        listing_ids: enriched.listingIds,
+        listing_count: enriched.listingCount,
+        median_price: enriched.medianPrice,
+        currency: enriched.currency,
+        average_favourites: enriched.averageFavourites,
+        top_favourites: enriched.topFavourites,
+      }),
+    })
+    return { ...enriched, id }
+  }
+  const rows = await readCollection<MarketplaceSnapshot>('marketplace-snapshots')
+  const saved = { ...enriched, id: enriched.id || randomUUID() }
+  await writeCollection('marketplace-snapshots', [saved, ...rows].slice(0, 1000))
+  return saved
+}
+
 export async function saveLead(email: string, attribution: LeadAttribution) {
   if (storageProvider === 'supabase') {
     try {
@@ -304,6 +372,7 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
         contentAngles: Array.isArray(row.content_angles) ? row.content_angles.filter((item): item is string => typeof item === 'string') : [],
         hooks: Array.isArray(row.hooks) ? row.hooks.filter((item): item is string => typeof item === 'string') : [],
         targetAudience: Array.isArray(row.target_audience) ? row.target_audience.filter((item): item is string => typeof item === 'string') : [],
+        marketplace: row.marketplace && typeof row.marketplace === 'object' ? row.marketplace as DashboardTrend['marketplace'] : undefined,
         evidence: String(row.evidence || row.topic || ''),
         status: row.status === 'approved' || row.status === 'rejected' || row.status === 'review' ? row.status : 'discovered',
         discoveredAt: String(row.discovered_at),

@@ -1,4 +1,4 @@
-import type { ProductConfig, TrendSignal } from './types.js'
+import type { MarketplaceObservation, ProductConfig, TrendSignal } from './types.js'
 
 type ScrappaItem = {
   id: number
@@ -12,6 +12,29 @@ type ScrappaItem = {
 type ScrappaResponse = {
   success?: boolean
   data?: { items?: ScrappaItem[] }
+}
+
+export type MarketplaceSnapshot = {
+  id?: string
+  query: string
+  country: string
+  observedAt: string
+  listingIds: string[]
+  listingCount: number
+  medianPrice: number
+  currency: string
+  averageFavourites: number
+  topFavourites: number
+  previousObservedAt?: string
+  listingCountDelta?: number
+  medianPriceDelta?: number
+  averageFavouritesDelta?: number
+  disappearedListingCount?: number
+}
+
+export type MarketplaceDiscovery = {
+  signal: TrendSignal
+  snapshot: MarketplaceSnapshot
 }
 
 const timeoutMs = 12_000
@@ -45,7 +68,7 @@ function cleanTopic(value: string | undefined, fallback: string) {
   return topic || fallback
 }
 
-export async function discoverMarketplaceSignals(product: ProductConfig): Promise<TrendSignal[]> {
+export async function discoverMarketplaceData(product: ProductConfig): Promise<MarketplaceDiscovery[]> {
   if (!process.env.SCRAPPA_API_KEY) return []
   const queries = product.searchQuery && !/seller|trend|demand|resale|fashion/i.test(product.searchQuery)
     ? [product.searchQuery, ...seedQueries]
@@ -57,7 +80,27 @@ export async function discoverMarketplaceSignals(product: ProductConfig): Promis
     const currency = items.find((item) => item.price?.currency_code)?.price?.currency_code || 'PLN'
     const topItem = items.slice().sort((a, b) => (b.favourite_count || 0) - (a.favourite_count || 0))[0]
     const evidence = `${items.length} active listings, median asking price ${median(prices)} ${currency}, average favourites ${Math.round(favourites.reduce((sum, value) => sum + value, 0) / items.length)}, top listing ${topItem?.favourite_count || 0} favourites. This is a live marketplace demand proxy, not confirmed sales data.`
+    const snapshot: MarketplaceSnapshot = {
+      query,
+      country: product.country,
+      observedAt: new Date().toISOString(),
+      listingIds: items.map((item) => String(item.id)),
+      listingCount: items.length,
+      medianPrice: median(prices),
+      currency,
+      averageFavourites: Math.round(favourites.reduce((sum, value) => sum + value, 0) / items.length),
+      topFavourites: topItem?.favourite_count || 0,
+    }
+    const marketplace: MarketplaceObservation = {
+      listingCount: snapshot.listingCount,
+      medianPrice: snapshot.medianPrice,
+      currency: snapshot.currency,
+      averageFavourites: snapshot.averageFavourites,
+      topFavourites: snapshot.topFavourites,
+    }
     return {
+      snapshot,
+      signal: {
       topic: cleanTopic(topItem?.title, query),
       category: 'marketplace product demand',
       source: 'Scrappa · Vinted marketplace',
@@ -67,6 +110,13 @@ export async function discoverMarketplaceSignals(product: ProductConfig): Promis
       season: new Date().toLocaleString('en', { month: 'long' }),
       keywords: [query, topItem?.brand_title || 'resale'].filter(Boolean),
       evidence,
+      marketplace,
+      },
     }
   })
+}
+
+export async function discoverMarketplaceSignals(product: ProductConfig): Promise<TrendSignal[]> {
+  const discoveries = await discoverMarketplaceData(product)
+  return discoveries.map(({ signal }) => signal)
 }
