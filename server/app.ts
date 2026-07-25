@@ -3,8 +3,9 @@ import path from 'node:path'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
+import { discoverMarketplaceData } from './marketplace.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
-import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
+import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -191,7 +192,29 @@ async function json(response: ServerResponse, status: number, payload: unknown, 
 }
 
 async function runCampaign(product: ProductConfig) {
-  const [newsSignals, marketplaceSignals] = await Promise.all([discoverGoogleNews(product), discoverMarketplaceSignals(product)])
+  const [newsSignals, marketplaceDiscoveries] = await Promise.all([discoverGoogleNews(product), discoverMarketplaceData(product)])
+  const marketplaceSignals = []
+  for (const discovery of marketplaceDiscoveries) {
+    const snapshot = await saveMarketplaceSnapshot(discovery.snapshot)
+    marketplaceSignals.push({
+      ...discovery.signal,
+      marketplace: {
+        listingCount: snapshot.listingCount,
+        medianPrice: snapshot.medianPrice,
+        currency: snapshot.currency,
+        averageFavourites: snapshot.averageFavourites,
+        topFavourites: snapshot.topFavourites,
+        snapshotId: snapshot.id,
+        previousObservedAt: snapshot.previousObservedAt,
+        listingCountDelta: snapshot.listingCountDelta,
+        medianPriceDelta: snapshot.medianPriceDelta,
+        averageFavouritesDelta: snapshot.averageFavouritesDelta,
+        disappearedListingCount: snapshot.disappearedListingCount,
+        estimatedVelocity: snapshot.disappearedListingCount,
+        velocityConfidence: snapshot.previousObservedAt ? 'low' as const : 'unavailable' as const,
+      },
+    })
+  }
   const discovered = [...marketplaceSignals, ...newsSignals]
   const existingCampaigns = await latestCampaigns()
   const existingTopics = new Set(existingCampaigns

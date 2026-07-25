@@ -25,6 +25,23 @@ export type TrendSignal = {
   season: string
   keywords: string[]
   evidence: string
+  marketplace?: MarketplaceObservation
+}
+
+export type MarketplaceObservation = {
+  snapshotId?: string
+  listingCount: number
+  medianPrice: number
+  currency: string
+  averageFavourites: number
+  topFavourites: number
+  previousObservedAt?: string
+  listingCountDelta?: number
+  medianPriceDelta?: number
+  averageFavouritesDelta?: number
+  disappearedListingCount?: number
+  estimatedVelocity?: number
+  velocityConfidence?: 'unavailable' | 'low' | 'medium'
 }
 
 export type Evaluation = {
