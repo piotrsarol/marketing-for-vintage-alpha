@@ -1,8 +1,13 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/campaigns/latest", "destination": "/api/campaigns-latest" },
+    { "source": "/api/campaigns/run", "destination": "/api/campaigns-run" },
+    { "source": "/api/trends/discover", "destination": "/api/trends-discover" }
+  ],
   "functions": {
-    "api/campaigns/run.ts": {
+    "api/campaigns-run.ts": {
       "maxDuration": 60
     }
   }
