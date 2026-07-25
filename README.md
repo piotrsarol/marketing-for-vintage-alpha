@@ -91,7 +91,7 @@ Import the JSON workflow in n8n. It is inactive by default so production operato
 
 ### Publishing integration status
 
-The application currently has a **transport seam**, not a connected social account. When `PUBLISH_WEBHOOK_URL` is set, the queue sends this payload to that secured endpoint:
+The application can publish directly through Buffer Free when `BUFFER_ACCESS_TOKEN` and channel IDs are configured. It uses Buffer's GraphQL `createPost` mutation with `customScheduled` and only marks a queue item published after Buffer returns a post ID. The older `PUBLISH_WEBHOOK_URL` path remains available for n8n/native adapters.
 
 ```json
 {
@@ -101,7 +101,16 @@ The application currently has a **transport seam**, not a connected social accou
 }
 ```
 
-The endpoint must perform the real platform publish and return a 2xx response. It can be an n8n webhook that routes to Buffer or native platform nodes. Without it, the dashboard keeps queue items un-published and reports that no provider is configured; it never claims a post was sent.
+Without either Buffer or the webhook configuration, the dashboard keeps queue items un-published and reports that no provider is configured; it never claims a post was sent.
+
+For Buffer:
+
+1. Create a Personal Key in Buffer **Settings → API** with post-write permission.
+2. Set `BUFFER_ACCESS_TOKEN` in Vercel Production.
+3. Set `BUFFER_CHANNEL_IDS` to a JSON object mapping queue platforms to Buffer channel IDs, for example `{"linkedin":"...","instagram":"..."}`.
+4. Run the queue action; each platform is scheduled using its existing `scheduledFor` timestamp.
+
+The Buffer token is server-only and must never be stored in Supabase or committed to the repository.
 
 The repository includes `automation/vinted-publisher-dispatcher.json` for the n8n side:
 

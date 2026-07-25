@@ -345,7 +345,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastOperation: providerStatus().lastOperation, lastError: providerStatus().lastProviderError },
         lastPipelineProvider: persistedProvider,
         marketplace: { provider: 'Scrappa', configured: Boolean(process.env.SCRAPPA_API_KEY) },
-        publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
+        publishing: { provider: currentPublisher(), configured: currentPublisher() !== 'mock' },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
       })
