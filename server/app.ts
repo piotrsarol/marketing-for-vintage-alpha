@@ -123,10 +123,10 @@ async function json(response: ServerResponse, status: number, payload: unknown, 
 
 async function runCampaign(product: ProductConfig) {
   const discovered = await discoverGoogleNews(product)
-  const evaluated = await Promise.all(discovered.map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
+  const evaluated = await Promise.all(discovered.slice(0, 6).map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
   const approved = evaluated.filter((item) => item.evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70)).slice(0, 3)
   const campaigns: Campaign[] = []
-  for (const { trend, evaluation } of approved) {
+  const generated = await Promise.all(approved.map(async ({ trend, evaluation }) => {
     const campaignId = randomUUID()
     const campaignSlug = `${slug(product.name)}-${slug(trend.topic)}`
     const landingUrl = new URL(product.url)
@@ -138,7 +138,10 @@ async function runCampaign(product: ProductConfig) {
       link.searchParams.set('utm_content', campaignId)
       return [channel, link.toString()]
     }))
-    campaigns.push(await saveCampaign({ id: campaignId, product, trend, evaluation, content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }, provider: currentProvider(), createdAt: new Date().toISOString() }))
+    return { id: campaignId, product, trend, evaluation, content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }, provider: currentProvider(), createdAt: new Date().toISOString() } satisfies Campaign
+  }))
+  for (const campaign of generated) {
+    campaigns.push(await saveCampaign(campaign))
   }
   return { discovered: discovered.length, approved: approved.length, campaigns }
 }

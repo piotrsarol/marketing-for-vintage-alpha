@@ -6,6 +6,7 @@ const dataDirectory = path.resolve(process.cwd(), '.data')
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 export const storageProvider = supabaseUrl && supabaseKey ? 'supabase' : 'local'
+const storageTimeoutMs = 10_000
 
 async function ensureDataDirectory() {
   await mkdir(dataDirectory, { recursive: true })
@@ -28,10 +29,18 @@ async function writeCollection<T>(name: string, records: T[]) {
 
 async function supabaseRequest<T>(resource: string, init?: RequestInit): Promise<T> {
   if (!supabaseUrl || !supabaseKey) throw new Error('Supabase storage is not configured')
-  const response = await fetch(`${supabaseUrl}/rest/v1/${resource}`, {
-    ...init,
-    headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), storageTimeoutMs)
+  let response: Response
+  try {
+    response = await fetch(`${supabaseUrl}/rest/v1/${resource}`, {
+      ...init,
+      signal: controller.signal,
+      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
   if (!response.ok) throw new Error(`Supabase request failed with ${response.status}: ${await response.text()}`)
   const text = await response.text()
   return text ? JSON.parse(text) as T : undefined as T
