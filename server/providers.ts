@@ -3,6 +3,7 @@ import type { Evaluation, ProductConfig, TrendSignal } from './types.js'
 type OpenAIResponse = { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }
 let openAIHealthy = false
 let lastProvider: 'openai' | 'mock' | 'unknown' = 'unknown'
+let lastProviderError: 'not_configured' | 'http_error' | 'empty_response' | 'invalid_json' | 'network_or_timeout' | null = null
 const providerTimeoutMs = 15_000
 
 async function fetchWithTimeout(input: string, init?: RequestInit) {
@@ -23,6 +24,7 @@ export function providerStatus() {
   return {
     configured: Boolean(process.env.OPENAI_API_KEY),
     lastProvider,
+    lastProviderError,
   }
 }
 
@@ -37,7 +39,12 @@ function parseJson<T>(value: string): T {
 
 async function askOpenAI<T>(prompt: string): Promise<T | null> {
   const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) { openAIHealthy = false; lastProvider = 'mock'; return null }
+  if (!apiKey) {
+    openAIHealthy = false
+    lastProvider = 'mock'
+    lastProviderError = 'not_configured'
+    return null
+  }
   try {
     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -47,18 +54,34 @@ async function askOpenAI<T>(prompt: string): Promise<T | null> {
     if (!response.ok) {
       openAIHealthy = false
       lastProvider = 'mock'
+      lastProviderError = 'http_error'
       console.warn(`OpenAI request failed with ${response.status}; using the local fallback provider.`)
       return null
     }
     const payload = await response.json() as OpenAIResponse
     const text = payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('')
-    if (!text) { openAIHealthy = false; lastProvider = 'mock'; return null }
+    if (!text) {
+      openAIHealthy = false
+      lastProvider = 'mock'
+      lastProviderError = 'empty_response'
+      return null
+    }
     openAIHealthy = true
     lastProvider = 'openai'
-    return parseJson<T>(text)
+    lastProviderError = null
+    try {
+      return parseJson<T>(text)
+    } catch {
+      openAIHealthy = false
+      lastProvider = 'mock'
+      lastProviderError = 'invalid_json'
+      console.warn('OpenAI returned invalid JSON; using the local fallback provider.')
+      return null
+    }
   } catch {
     openAIHealthy = false
     lastProvider = 'mock'
+    lastProviderError = 'network_or_timeout'
     console.warn('OpenAI request failed; using the local fallback provider.')
     return null
   }
