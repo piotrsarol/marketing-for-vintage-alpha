@@ -1,10 +1,15 @@
 import type { Evaluation, ProductConfig, TrendSignal } from './types.js'
 import { discoverMarketplaceSignals } from './marketplace.js'
 
-type OpenAIResponse = { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }
+type OpenAIResponse = {
+  status?: string
+  incomplete_details?: { reason?: string }
+  output_text?: string
+  output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; refusal?: string }> }>
+}
 let openAIHealthy = false
 let lastProvider: 'openai' | 'mock' | 'unknown' = 'unknown'
-let lastProviderError: 'not_configured' | 'unauthorized' | 'rate_limited' | 'http_error' | 'empty_response' | 'invalid_json' | 'network_or_timeout' | null = null
+let lastProviderError: 'not_configured' | 'unauthorized' | 'rate_limited' | 'http_error' | 'empty_response' | 'incomplete_response' | 'refusal' | 'invalid_json' | 'network_or_timeout' | null = null
 let lastProviderOperation: 'evaluation' | 'generation' | 'unknown' = 'unknown'
 const providerTimeoutMs = 30_000
 
@@ -63,6 +68,20 @@ async function askOpenAI<T>(prompt: string, operation: 'evaluation' | 'generatio
       return null
     }
     const payload = await response.json() as OpenAIResponse
+    if (payload.status === 'incomplete') {
+      openAIHealthy = false
+      lastProvider = 'mock'
+      lastProviderError = 'incomplete_response'
+      console.warn(`OpenAI response was incomplete (${payload.incomplete_details?.reason || 'unknown'}); using the local fallback provider.`)
+      return null
+    }
+    if (payload.output?.some((item) => item.content?.some((content) => content.type === 'refusal' || content.refusal))) {
+      openAIHealthy = false
+      lastProvider = 'mock'
+      lastProviderError = 'refusal'
+      console.warn('OpenAI refused the request; using the local fallback provider.')
+      return null
+    }
     const outputText = typeof payload.output_text === 'string' ? payload.output_text.trim() : ''
     const nestedText = payload.output?.flatMap((item) => item.content ?? []).map((item) => typeof item.text === 'string' ? item.text : '').join('').trim() || ''
     const text = outputText || nestedText
@@ -168,7 +187,7 @@ export async function evaluateTrend(signal: TrendSignal, product: ProductConfig)
 }
 
 export async function generateContent(signal: TrendSignal, evaluation: Evaluation, product: ProductConfig) {
-  const result = await askOpenAI<Record<string, unknown>>(`Create one product-opportunity campaign from this approved Vinted market signal. Focus on what may be gaining demand and how Vinted Analytics helps sellers validate it before the market gets crowded. Do not claim low supply as fact unless the evidence supports it; frame unverified supply as a hypothesis to check. Return JSON only with keys linkedin, twitterThread, reddit, blog, email, instagram, tiktok, youtubeShort, carousel. Each value should be ready-to-publish copy or a structured outline. Write all user-facing copy in ${product.language}. Include a clear but non-pushy waitlist CTA using ${product.callToAction}. Product: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}\nOpportunity: ${JSON.stringify(evaluation)}`, 'generation')
+  const result = await askOpenAI<Record<string, unknown>>(`Create one concise product-opportunity campaign from this approved Vinted market signal. Focus on what may be gaining demand and how Vinted Analytics helps sellers validate it before the market gets crowded. Do not claim low supply as fact unless the evidence supports it; frame unverified supply as a hypothesis to check. Return JSON only with keys linkedin, twitterThread, reddit, blog, email, instagram, tiktok, youtubeShort, carousel. Keep the complete JSON under 2,000 tokens: use short ready-to-publish copy, a compact blog outline, and 4 concise carousel slides. Write all user-facing copy in ${product.language}. Include a clear but non-pushy waitlist CTA using ${product.callToAction}. Product: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}\nOpportunity: ${JSON.stringify(evaluation)}`, 'generation')
   if (result) return result
   const polish = product.language.toLowerCase().startsWith('pl')
   return polish
