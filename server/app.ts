@@ -86,12 +86,6 @@ function cookieValue(request: IncomingMessage, name: string) {
   return cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) || ''
 }
 
-function hasSession(request: IncomingMessage) {
-  const [expiresAtText, signature] = cookieValue(request, adminCookieName).split('.')
-  const expiresAt = Number(expiresAtText)
-  return Number.isSafeInteger(expiresAt) && expiresAt > Math.floor(Date.now() / 1000) && safeEqual(signature || '', sessionSignature(expiresAt))
-}
-
 function encodeCookiePayload(value: unknown) {
   return Buffer.from(JSON.stringify(value)).toString('base64url')
 }
@@ -157,7 +151,7 @@ async function hasAdminAccess(request: IncomingMessage) {
   const configuredToken = process.env.ADMIN_API_TOKEN
   if (configuredToken) {
     const provided = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : ''
-    if (safeEqual(configuredToken, provided) || hasSession(request)) return true
+    if (safeEqual(configuredToken, provided)) return true
   }
   if (!configuredToken && process.env.NODE_ENV !== 'production') return true
   return hasSupabaseAccess(request)
