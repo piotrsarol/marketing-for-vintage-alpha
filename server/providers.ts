@@ -6,7 +6,7 @@ let openAIHealthy = false
 let lastProvider: 'openai' | 'mock' | 'unknown' = 'unknown'
 let lastProviderError: 'not_configured' | 'unauthorized' | 'rate_limited' | 'http_error' | 'empty_response' | 'invalid_json' | 'network_or_timeout' | null = null
 let lastProviderOperation: 'evaluation' | 'generation' | 'unknown' = 'unknown'
-const providerTimeoutMs = 15_000
+const providerTimeoutMs = 30_000
 
 async function fetchWithTimeout(input: string, init?: RequestInit) {
   const controller = new AbortController()
@@ -53,7 +53,7 @@ async function askOpenAI<T>(prompt: string, operation: 'evaluation' | 'generatio
     const response = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5-mini', input: prompt, text: { format: { type: 'json_object' } } }),
+      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5-mini', input: prompt, max_output_tokens: operation === 'generation' ? 3000 : 1200, text: { format: { type: 'json_object' } } }),
     })
     if (!response.ok) {
       openAIHealthy = false
