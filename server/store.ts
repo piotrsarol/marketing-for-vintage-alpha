@@ -181,7 +181,7 @@ export async function updateQueueItem(id: string, update: Partial<Pick<QueueItem
       ...(update.status ? { status: update.status } : {}),
       ...(update.attempts !== undefined ? { attempts: update.attempts } : {}),
       ...(update.externalId ? { external_id: update.externalId } : {}),
-      ...(update.lastError ? { last_error: update.lastError } : {}),
+      ...(Object.prototype.hasOwnProperty.call(update, 'lastError') ? { last_error: update.lastError || null } : {}),
     }) })
     return
   }
@@ -346,7 +346,7 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
       const [trendRows, campaigns, queueRows, leads, events, jobs] = await Promise.all([
         supabaseRequest<Array<Record<string, unknown>>>('trends?select=*&order=discovered_at.desc&limit=100'),
         latestCampaigns(),
-        supabaseRequest<Array<Record<string, unknown>>>('publishing_queue?select=*&order=scheduled_for.asc&limit=100'),
+        supabaseRequest<Array<Record<string, unknown>>>('publishing_queue?select=*&order=scheduled_for.asc&limit=500'),
         supabaseRequest<Array<{ email: string; source?: string; created_at: string }>>('waitlist_leads?select=email,source,created_at&order=created_at.desc&limit=50'),
         supabaseRequest<Array<{ event: string; utm_campaign?: string }>>('funnel_events?select=event,utm_campaign&limit=10000'),
         supabaseRequest<Array<{ workflow: string; status: string; started_at: string; finished_at?: string; error?: string }>>('job_runs?select=workflow,status,started_at,finished_at,error&order=started_at.desc&limit=30'),
@@ -382,7 +382,7 @@ export async function dashboardSnapshot(): Promise<DashboardSnapshot> {
         campaignId: typeof row.campaign_id === 'string' ? row.campaign_id : undefined,
         platform: String(row.platform),
         scheduledFor: String(row.scheduled_for),
-        status: row.status === 'published' || row.status === 'failed' ? row.status : 'queued',
+        status: row.status === 'published' || row.status === 'failed' || row.status === 'cancelled' ? row.status : 'queued',
         attempts: Number(row.attempts || 0),
         externalId: typeof row.external_id === 'string' ? row.external_id : undefined,
         lastError: typeof row.last_error === 'string' ? row.last_error : undefined,
