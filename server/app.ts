@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
+import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent, normalizeTrendTopic } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
@@ -179,7 +179,12 @@ async function json(response: ServerResponse, status: number, payload: unknown, 
 
 async function runCampaign(product: ProductConfig) {
   const discovered = await discoverGoogleNews(product)
-  const evaluated = await Promise.all(discovered.slice(0, 6).map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
+  const existingCampaigns = await latestCampaigns()
+  const existingTopics = new Set(existingCampaigns
+    .filter((campaign) => campaign.product.name === product.name)
+    .map((campaign) => normalizeTrendTopic(campaign.trend.topic)))
+  const fresh = discovered.filter((trend) => !existingTopics.has(normalizeTrendTopic(trend.topic)))
+  const evaluated = await Promise.all(fresh.slice(0, 6).map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
   const approved = evaluated.filter((item) => item.evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70)).slice(0, 3)
   await Promise.all(evaluated.map(({ trend, evaluation }) => saveTrend(trend, evaluation, evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70) ? 'approved' : 'review')))
   const campaigns: Campaign[] = []
