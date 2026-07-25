@@ -207,7 +207,7 @@ async function runCampaign(product: ProductConfig) {
       evaluation,
       strategy: {
         objective: 'waitlist_signups',
-        hypothesis: `Vinted sellers will join early access if shown how ${evaluation.contentAngles[0] || 'this market signal'} can improve sourcing decisions.`,
+        hypothesis: `Vinted sellers will join early access if shown a fresh ${evaluation.productCategory || 'market'} opportunity and how to validate demand before sourcing.`,
         angle: evaluation.contentAngles[0] || 'data-led sourcing',
         primaryChannel: 'linkedin',
         successMetric: 'landing_page_conversion',

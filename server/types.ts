@@ -39,6 +39,12 @@ export type Evaluation = {
   contentAngles: string[]
   hooks: string[]
   targetAudience: string[]
+  opportunityType?: 'product_rising_interest' | 'pricing' | 'seasonality' | 'inventory' | 'education'
+  productCategory?: string
+  demandEvidence?: string
+  supplyStatus?: 'unverified' | 'hypothesis'
+  opportunityConfidence?: number
+  recommendedAction?: string
 }
 
 export type Campaign = {
