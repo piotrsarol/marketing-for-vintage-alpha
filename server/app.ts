@@ -304,7 +304,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       return json(response, 200, {
         product,
         updatedAt: stored.updatedAt,
-        ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastError: providerStatus().lastProviderError },
+        ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastOperation: providerStatus().lastOperation, lastError: providerStatus().lastProviderError },
         marketplace: { provider: 'Scrappa', configured: Boolean(process.env.SCRAPPA_API_KEY) },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
