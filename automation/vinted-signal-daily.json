@@ -1,0 +1,15 @@
+{
+  "name": "Vinted Signal · Daily demand validation",
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 24 }] } }, "id": "cron", "name": "Daily 06:00", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0] },
+    { "parameters": { "method": "GET", "url": "={{$env.TRENDS_API_URL || 'http://host.docker.internal:3000/api/trends/discover'}}", "options": {} }, "id": "discover", "name": "Collect trend signals", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [220, 0] },
+    { "parameters": { "method": "POST", "url": "={{$env.API_URL || 'http://host.docker.internal:3000/api/trends/evaluate'}}", "sendBody": true, "jsonBody": "={{ { trends: $json.trends, model: 'gpt-5' } }}", "options": {} }, "id": "evaluate", "name": "Score with AI", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [440, 0] },
+    { "parameters": { "method": "POST", "url": "={{$env.API_URL || 'http://host.docker.internal:3000/api/campaigns/generate'}}", "sendBody": true, "jsonBody": "={{ { approvedTrends: $json.approved, output: ['linkedin','twitter','reddit','blog','email','instagram','tiktok','youtube','carousel'] } }}", "options": {} }, "id": "content", "name": "Generate campaign", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [660, 0] },
+    { "parameters": { "method": "POST", "url": "={{$env.API_URL || 'http://host.docker.internal:3000/api/publishing/schedule'}}", "sendBody": true, "jsonBody": "={{ { campaigns: $json.campaigns, timezone: 'Europe/Warsaw' } }}", "options": {} }, "id": "schedule", "name": "Schedule queue", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [880, 0] },
+    { "parameters": { "method": "POST", "url": "={{$env.NOTIFY_WEBHOOK_URL || 'https://example.invalid/notify'}}", "sendBody": true, "jsonBody": "={{ { text: 'Vinted Signal daily run completed', summary: $json } }}", "options": {} }, "id": "notify", "name": "Notify success", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1100, 0] }
+  ],
+  "connections": { "Daily 06:00": { "main": [[{ "node": "Collect trend signals", "type": "main", "index": 0 }]] }, "Collect trend signals": { "main": [[{ "node": "Score with AI", "type": "main", "index": 0 }]] }, "Score with AI": { "main": [[{ "node": "Generate campaign", "type": "main", "index": 0 }]] }, "Generate campaign": { "main": [[{ "node": "Schedule queue", "type": "main", "index": 0 }]] }, "Schedule queue": { "main": [[{ "node": "Notify success", "type": "main", "index": 0 }]] } },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "vinted-signal-mvp"
+}

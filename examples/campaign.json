@@ -1,0 +1,11 @@
+{
+  "trend": { "topic": "Adidas Samba OG", "category": "sneakers", "score": 94, "source": "Google Trends", "country": "PL" },
+  "evaluation": { "virality": 91, "commercialIntent": 96, "novelty": 84, "evergreenScore": 72, "vintedRelevance": 95, "predictedEngagement": 88, "reasoning": "Search momentum is rising while resale supply remains fragmented." },
+  "content": {
+    "linkedin": "The Samba comeback is not random. Three signals say demand is still early: rising search volume, renewed creator coverage, and strong resale price stability. Track the signal before the feed gets crowded.",
+    "instagram": "The next resale signal is already moving. Save this before your sourcing run: Adidas Samba OG. #vintedseller #sneakerreseller #vintedsourcing",
+    "tiktok": { "hook": "If you still think Sambas are saturated, look at this first.", "beats": ["Search interest is up 28%", "Listings are not growing at the same pace", "The best window is before the next creator wave"], "cta": "Join the waitlist for the weekly signal report." },
+    "carousel": { "slides": 8, "title": "The Samba signal: early or already saturated?", "renderStatus": "mock-provider-ready" }
+  },
+  "schedule": [{ "platform": "linkedin", "at": "09:00" }, { "platform": "instagram", "at": "12:00" }, { "platform": "tiktok", "at": "15:00" }, { "platform": "pinterest", "at": "18:00" }, { "platform": "twitter", "at": "21:00" }]
+}
