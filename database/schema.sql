@@ -38,7 +38,7 @@ create table if not exists publishing_queue (
   campaign_id uuid references campaigns(id) on delete cascade,
   platform text not null,
   scheduled_for timestamptz not null,
-  status text not null default 'queued' check (status in ('queued','published','failed')),
+  status text not null default 'queued' check (status in ('queued','published','failed','cancelled')),
   attempts integer not null default 0,
   external_id text,
   last_error text

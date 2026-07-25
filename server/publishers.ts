@@ -6,6 +6,24 @@ export function currentPublisher(): PublisherName {
   return process.env.BUFFER_ACCESS_TOKEN ? 'buffer' : process.env.PUBLISH_WEBHOOK_URL ? 'webhook' : 'mock'
 }
 
+export function configuredPublisherPlatforms(): string[] {
+  if (process.env.BUFFER_ACCESS_TOKEN) {
+    try {
+      const channels = JSON.parse(process.env.BUFFER_CHANNEL_IDS || '{}') as Record<string, unknown>
+      return Object.keys(channels).filter((platform) => typeof channels[platform] === 'string' && channels[platform])
+    } catch {
+      return []
+    }
+  }
+  return ['linkedin', 'instagram', 'tiktok', 'youtube', 'pinterest', 'email']
+}
+
+export function publisherConfigured() {
+  return currentPublisher() === 'buffer'
+    ? configuredPublisherPlatforms().length > 0
+    : currentPublisher() === 'webhook'
+}
+
 export async function publishQueuedItem(item: QueueItem, campaign: Campaign) {
   if (process.env.BUFFER_ACCESS_TOKEN) return publishToBuffer(item, campaign)
   const webhook = process.env.PUBLISH_WEBHOOK_URL
@@ -45,9 +63,35 @@ function campaignText(platform: string, campaign: Campaign) {
   return text || `${campaign.trend.topic}\n\n${campaign.product.callToAction}`
 }
 
+function contentImageUrl(campaign: Campaign): string | undefined {
+  const content = campaign.content as Record<string, unknown>
+  const assets = content.assets
+  if (Array.isArray(assets)) {
+    const asset = assets.find((entry): entry is { image?: { url?: unknown } } => Boolean(entry && typeof entry === 'object'))
+    if (typeof asset?.image?.url === 'string') return asset.image.url
+  }
+  if (typeof content.imageUrl === 'string') return content.imageUrl
+  return process.env.BUFFER_DEFAULT_IMAGE_URL
+}
+
 async function publishToBuffer(item: QueueItem, campaign: Campaign) {
   const channelId = bufferChannelId(item.platform)
   if (!channelId) throw new Error(`No Buffer channel configured for ${item.platform}. Set BUFFER_CHANNEL_${item.platform.toUpperCase()} or BUFFER_CHANNEL_IDS.`)
+  const isInstagram = item.platform === 'instagram'
+  const imageUrl = isInstagram ? contentImageUrl(campaign) : undefined
+  if (isInstagram && !imageUrl) {
+    throw new Error('Instagram publishing needs a public image URL. Add BUFFER_DEFAULT_IMAGE_URL or campaign content.imageUrl.')
+  }
+  const isDue = new Date(item.scheduledFor).getTime() <= Date.now()
+  const input = {
+    text: campaignText(item.platform, campaign),
+    channelId,
+    schedulingType: 'automatic',
+    mode: isDue ? 'shareNow' : 'customScheduled',
+    ...(isDue ? {} : { dueAt: item.scheduledFor }),
+    ...(imageUrl ? { assets: [{ image: { url: imageUrl } }] } : {}),
+    ...(isInstagram ? { metadata: { instagram: { type: 'post', shouldShareToFeed: true } } } : {}),
+  }
   const response = await fetch('https://api.buffer.com', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.BUFFER_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
@@ -59,13 +103,7 @@ async function publishToBuffer(item: QueueItem, campaign: Campaign) {
         }
       }`,
       variables: {
-        input: {
-          text: campaignText(item.platform, campaign),
-          channelId,
-          schedulingType: 'automatic',
-          mode: 'customScheduled',
-          dueAt: item.scheduledFor,
-        },
+        input,
       },
     }),
   })

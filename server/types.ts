@@ -108,7 +108,7 @@ export type QueueItem = {
   campaignId?: string
   platform: string
   scheduledFor: string
-  status: 'queued' | 'published' | 'failed'
+  status: 'queued' | 'published' | 'failed' | 'cancelled'
   attempts: number
   externalId?: string
   lastError?: string

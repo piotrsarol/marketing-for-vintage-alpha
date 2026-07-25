@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { discoverMarketplaceData } from './marketplace.js'
-import { currentPublisher, publishQueuedItem } from './publishers.js'
+import { configuredPublisherPlatforms, currentPublisher, publishQueuedItem, publisherConfigured } from './publishers.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
@@ -256,7 +256,7 @@ async function runCampaign(product: ProductConfig) {
   }))
   for (const campaign of generated) {
     const saved = await saveCampaign(campaign)
-    await saveQueueItems(saved.id, ['linkedin', 'instagram', 'tiktok', 'youtube', 'pinterest', 'email'])
+    await saveQueueItems(saved.id, configuredPublisherPlatforms())
     campaigns.push(saved)
   }
   return { discovered: discovered.length, approved: approved.length, campaigns, provider: providerStatus() }
@@ -345,7 +345,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastOperation: providerStatus().lastOperation, lastError: providerStatus().lastProviderError },
         lastPipelineProvider: persistedProvider,
         marketplace: { provider: 'Scrappa', configured: Boolean(process.env.SCRAPPA_API_KEY) },
-        publishing: { provider: currentPublisher(), configured: currentPublisher() !== 'mock' },
+        publishing: { provider: currentPublisher(), configured: publisherConfigured() },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
       })
@@ -358,19 +358,29 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const saved = await saveOperatorSettings(product)
       return json(response, 200, { product: saved.product, updatedAt: saved.updatedAt })
     }
-    if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process') && request.method === 'POST') {
+    if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process' || url.pathname === '/api/publishing/retry' || url.pathname === '/api/publishing/cleanup') && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       const product = await configuredProduct()
       const fullSnapshot = await dashboardSnapshot()
       const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === product.name)
       const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
       const input = await body(request)
-      const requestedIds = url.pathname.endsWith('/publish') && typeof input.queueId === 'string' ? [input.queueId] : snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() <= Date.now()).map((item) => item.id)
+      if (url.pathname.endsWith('/cleanup')) {
+        const olderThanHours = typeof input.olderThanHours === 'number' && input.olderThanHours > 0 ? input.olderThanHours : 24
+        const cutoff = Date.now() - olderThanHours * 60 * 60 * 1000
+        const stale = snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() < cutoff)
+        await Promise.all(stale.map((item) => updateQueueItem(item.id, { status: 'cancelled', lastError: `Cancelled as stale after ${olderThanHours} hours.` })))
+        return json(response, 200, { cancelled: stale.length })
+      }
+      const isSingle = (url.pathname.endsWith('/publish') || url.pathname.endsWith('/retry')) && typeof input.queueId === 'string'
+      const requestedIds = isSingle
+        ? [input.queueId as string]
+        : snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() <= Date.now()).map((item) => item.id)
       const results = []
       for (const queueId of requestedIds) {
         const item = snapshot.queue.find((candidate) => candidate.id === queueId)
         const campaign = item?.campaignId ? snapshot.campaigns.find((candidate) => candidate.id === item.campaignId) : undefined
-        if (!item || !campaign) {
+        if (!item || !campaign || (item.status !== 'queued' && item.status !== 'failed')) {
           results.push({ queueId, status: 'failed', error: 'Campaign payload is not available for this queue item.' })
           continue
         }

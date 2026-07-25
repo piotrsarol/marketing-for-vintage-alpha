@@ -93,6 +93,8 @@ Import the JSON workflow in n8n. It is inactive by default so production operato
 
 The application can publish directly through Buffer Free when `BUFFER_ACCESS_TOKEN` and channel IDs are configured. It uses Buffer's GraphQL `createPost` mutation with `customScheduled` and only marks a queue item published after Buffer returns a post ID. The older `PUBLISH_WEBHOOK_URL` path remains available for n8n/native adapters.
 
+The operator dashboard is the control plane for the full workflow: run discovery, inspect scored campaigns, process due queue items, publish an individual item immediately, retry failed items, cancel stale jobs, and export queue or waitlist CSVs. Buffer channel mapping limits new queue items to configured channels. Instagram requires a public image URL; set `BUFFER_DEFAULT_IMAGE_URL` or include `content.imageUrl` in a campaign payload.
+
 ```json
 {
   "platform": "instagram",
