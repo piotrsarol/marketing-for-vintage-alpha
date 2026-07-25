@@ -39,6 +39,13 @@ export type Campaign = {
   product: ProductConfig
   trend: TrendSignal
   evaluation: Evaluation
+  strategy: {
+    objective: 'waitlist_signups'
+    hypothesis: string
+    angle: string
+    primaryChannel: string
+    successMetric: 'landing_page_conversion'
+  }
   content: Record<string, unknown>
   provider: 'openai' | 'mock'
   createdAt: string

@@ -1,0 +1,64 @@
+{
+  "name": "Vinted Signal · Publisher dispatcher",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vinted-publisher",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Receive queued asset",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "vinted-publisher"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? $json;\nconst platform = String(payload.platform || '').toLowerCase();\nconst envKey = `PUBLISH_${platform.toUpperCase()}_URL`;\nconst targetUrl = $env[envKey];\nif (!platform || !targetUrl) throw new Error(`No n8n channel adapter configured for ${platform || 'unknown platform'} (${envKey})`);\nreturn [{ json: { payload, platform, targetUrl } }];"
+      },
+      "id": "select",
+      "name": "Select channel adapter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.targetUrl}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.payload}}",
+        "options": {}
+      },
+      "id": "dispatch",
+      "name": "Dispatch to channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, platform: $('Select channel adapter').item.json.platform, externalId: $json.id || $json.externalId || null } }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Confirm dispatch",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 0]
+    }
+  ],
+  "connections": {
+    "Receive queued asset": { "main": [[{ "node": "Select channel adapter", "type": "main", "index": 0 }]] },
+    "Select channel adapter": { "main": [[{ "node": "Dispatch to channel", "type": "main", "index": 0 }]] },
+    "Dispatch to channel": { "main": [[{ "node": "Confirm dispatch", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "vinted-publisher-dispatcher"
+}
