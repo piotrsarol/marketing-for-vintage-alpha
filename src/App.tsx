@@ -4,6 +4,7 @@ import './App.css'
 
 type View = 'overview' | 'trends' | 'content' | 'queue' | 'leads'
 type Trend = { topic: string; category: string; score: number; delta: string; source: string; sourceType: 'Google Trends' | 'Pinterest' | 'Reddit' | 'RSS'; audience: string; status: 'Approved' | 'Review' }
+type LiveCampaign = { id: string; provider: 'openai' | 'mock'; trend: { topic: string }; content: Record<string, unknown> }
 
 const trends: Trend[] = [
   { topic: 'Adidas Samba OG', category: 'Sneakers', score: 94, delta: '+28%', source: 'Google Trends', sourceType: 'Google Trends', audience: 'Sneaker resellers', status: 'Approved' },
@@ -24,13 +25,31 @@ function App() {
   const [signedUp, setSignedUp] = useState(() => Boolean(localStorage.getItem('vinted-signal-waitlist')))
   const [notice, setNotice] = useState('')
   const [running, setRunning] = useState(false)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [adminToken, setAdminToken] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [campaigns, setCampaigns] = useState<LiveCampaign[]>([])
   const [trendFilter, setTrendFilter] = useState('All sources')
   const filteredTrends = useMemo(() => trendFilter === 'All sources' ? trends : trends.filter((trend) => trend.sourceType === trendFilter), [trendFilter])
+  async function loadLatestCampaigns() {
+    const response = await fetch('/api/campaigns/latest', { credentials: 'same-origin' })
+    if (!response.ok) return
+    const result = await response.json() as { campaigns?: LiveCampaign[] }
+    setCampaigns(result.campaigns || [])
+  }
   useEffect(() => {
     void fetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...attribution(), event: 'page_view', sessionId: sessionId(), path: window.location.pathname }),
+    }).catch(() => undefined)
+  }, [])
+  useEffect(() => {
+    void fetch('/api/admin/session', { credentials: 'same-origin' }).then((response) => response.json()).then((result: { authenticated?: boolean }) => {
+      if (result.authenticated) {
+        setAuthenticated(true)
+        void loadLatestCampaigns()
+      }
     }).catch(() => undefined)
   }, [])
   async function submitWaitlist(event: FormEvent<HTMLFormElement>) {
@@ -45,17 +64,40 @@ function App() {
     setSignedUp(true); setNotice('You are on the list. We will send the first signal report soon.')
   }
   async function runLiveCampaign() {
+    if (!authenticated) {
+      setView('content')
+      setAdminError('Sign in to run a campaign.')
+      return
+    }
     setRunning(true)
     try {
-      const response = await fetch('/api/campaigns/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
-      const result = await response.json() as { approved?: number; error?: string }
+      const response = await fetch('/api/campaigns/run', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      const result = await response.json() as { approved?: number; campaigns?: LiveCampaign[]; error?: string }
       if (!response.ok) throw new Error(result.error || 'Campaign run failed')
+      setCampaigns(result.campaigns || [])
       setNotice(`Campaign run complete: ${result.approved ?? 0} approved campaigns saved.`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Campaign run failed. Start the API server first.')
     } finally {
       setRunning(false)
     }
+  }
+  async function loginAdmin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAdminError('')
+    const response = await fetch('/api/admin/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: adminToken }) })
+    if (!response.ok) {
+      setAdminError('Invalid admin token.')
+      return
+    }
+    setAdminToken('')
+    setAuthenticated(true)
+    await loadLatestCampaigns()
+  }
+  async function logoutAdmin() {
+    await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' })
+    setAuthenticated(false)
+    setCampaigns([])
   }
   return <div className="app-shell">
     <aside className="sidebar">
@@ -68,13 +110,25 @@ function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
       {view === 'overview' && <Overview onExplore={() => setView('trends')} />}
       {view === 'trends' && <section className="page-section"><PageIntro eyebrow="DEMAND VALIDATION" title="Trend radar" description="Every signal is scored for momentum, commercial intent, and relevance to Vinted sellers." action={<button className="primary-button" onClick={() => setNotice('Discovery run queued for the next available worker.')}>Run discovery <span>↗</span></button>} /><div className="filter-row"><div className="tabs"><button className="active">All signals <span>24</span></button><button>Approved <span>18</span></button><button>Needs review <span>6</span></button></div><select value={trendFilter} onChange={(event) => setTrendFilter(event.target.value)}><option>All sources</option><option>Google Trends</option><option>Pinterest</option><option>Reddit</option><option>RSS</option></select></div><TrendTable data={filteredTrends} /></section>}
-      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="One approved trend becomes a complete multi-channel campaign, ready for review or scheduling." action={<button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button>} /><div className="content-grid">{[['LinkedIn post', '1,240', '+18%', 'blue'], ['Instagram carousel', '3,810', '+31%', 'pink'], ['TikTok script', '—', 'Ready', 'dark']].map(([label, value, change, color]) => <div className="content-card" key={label}><div className={`social-icon ${color}`}>{label[0]}</div><div><span>{label}</span><strong>{value}</strong><em>{change}</em></div><button>Open ↗</button></div>)}</div><div className="studio-preview"><div><span className="eyebrow">CAMPAIGN PREVIEW</span><h2>Live product configuration</h2><p>The API discovers current signals for the configured product, evaluates them, and saves a full multi-channel campaign. Configure PRODUCT_* in .env before running.</p><div className="asset-pills"><span>▣ carousel</span><span>◉ short-form</span><span>✉ email</span></div></div><div className="phone-preview"><div className="phone-top">VINTED SIGNAL <span>•••</span></div><div className="shoe-art">LIVE<br /><i>RUN</i></div><div className="phone-copy">Real signals.<br /><b>Today.</b></div></div></div></section>}
+      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="Run the real campaign engine here. Generated content and tracked landing links stay behind the admin session." action={authenticated ? <><button className="secondary-button" onClick={logoutAdmin}>Sign out</button><button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button></> : undefined} />{authenticated ? <LiveCampaigns campaigns={campaigns} /> : <AdminLogin token={adminToken} error={adminError} onTokenChange={setAdminToken} onSubmit={loginAdmin} />}</section>}
       {view === 'queue' && <section className="page-section"><PageIntro eyebrow="DISTRIBUTION" title="Publishing queue" description="Your approved content is queued across channels with built-in retry handling." action={<button className="secondary-button" onClick={() => setNotice('Queue exported as CSV.')}>Export queue</button>} /><div className="queue-list">{queue.map((item) => <div className="queue-item" key={item.title}><div className={`social-icon ${item.color}`}>{item.icon}</div><div className="queue-copy"><b>{item.title}</b><span>{item.platform} · {item.time}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status}</span><button className="more">•••</button></div>)}</div></section>}
       {view === 'leads' && <section className="page-section"><PageIntro eyebrow="DEMAND SIGNAL" title="Waitlist" description="Capture early interest before launch and understand which content turns into qualified demand." action={<button className="secondary-button" onClick={() => setNotice('CSV export prepared.')}>Export leads</button>} /><div className="lead-layout"><div className="lead-card"><span className="eyebrow">TOTAL SIGNUPS</span><strong>248</strong><span className="positive">↑ 24% this week</span><div className="sparkline">{Array.from({ length: 11 }, (_, index) => <i key={index} />)}</div></div><div className="lead-card"><span className="eyebrow">CONVERSION RATE</span><strong>6.8%</strong><span className="positive">↑ 1.2 pts this week</span><div className="conversion-bar"><span /></div><small>Landing page visitors · 3,647</small></div></div><div className="lead-table"><div className="table-heading"><span>Recent signups</span><span>Source</span><span>Joined</span></div>{['anna@vintageclub.co', 'milo.resells@gmail.com', 'hello@retro-room.com', 'kasia.thrift@gmail.com'].map((lead, index) => <div className="table-row" key={lead}><b>{lead}</b><span>{['Instagram', 'Google', 'TikTok', 'Pinterest'][index]}</span><span>Today, {['14:32', '12:08', '10:41', '09:16'][index]}</span></div>)}</div></section>}
       {notice && <button className="toast" onClick={() => setNotice('')}>{notice} <span>×</span></button>}
     </main>
     <section className="landing-card"><div className="landing-copy"><span className="eyebrow">COMING SOON · FOR VINTED SELLERS</span><h2>Find the next trend<br /><i>before everyone else.</i></h2><p>Weekly signals from the Vinted marketplace, scored by AI and delivered before the market gets crowded.</p>{signedUp ? <div className="signed-up">✓ You’re on the waitlist</div> : <form onSubmit={submitWaitlist}><input aria-label="Email address" placeholder="Your email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /><button type="submit">Join waitlist <span>↗</span></button></form>}<small>{signedUp ? 'We’ll be in touch soon.' : 'No spam. Just early access and useful signals.'}</small></div><div className="landing-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="trend-card floating"><span className="mini-label">TREND SIGNAL · 94/100</span><b>Adidas Samba OG</b><div className="trend-metric"><span>Momentum</span><strong>+28%</strong></div><div className="mini-chart">{Array.from({ length: 7 }, (_, index) => <i key={index} />)}</div></div><div className="signal-dot dot-one">✦</div><div className="signal-dot dot-two">↗</div></div></section>
   </div>
+}
+
+function AdminLogin({ token, error, onTokenChange, onSubmit }: { token: string; error: string; onTokenChange: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="studio-preview"><div><span className="eyebrow">OPERATOR ACCESS</span><h2>Sign in to run campaigns</h2><p>Your admin token is used only to create an encrypted session cookie. It is never stored in the browser or exposed to the API response.</p><form onSubmit={onSubmit}><input aria-label="Admin token" type="password" placeholder="Admin API token" value={token} onChange={(event) => onTokenChange(event.target.value)} required /><button className="primary-button" type="submit">Sign in <span>↗</span></button></form>{error && <small>{error}</small>}</div></div>
+}
+
+function LiveCampaigns({ campaigns }: { campaigns: LiveCampaign[] }) {
+  if (!campaigns.length) return <div className="studio-preview"><div><span className="eyebrow">READY</span><h2>No campaigns yet</h2><p>Run the campaign engine to discover a signal, generate content with the configured provider, and save the result to Supabase.</p></div></div>
+  return <div className="live-campaigns">{campaigns.map((campaign) => {
+    const tracking = campaign.content.tracking as { links?: Record<string, string> } | undefined
+    return <article className="studio-preview" key={campaign.id}><div><span className="eyebrow">CAMPAIGN · {campaign.provider.toUpperCase()}</span><h2>{campaign.trend.topic}</h2><pre>{JSON.stringify(campaign.content, null, 2)}</pre>{tracking?.links && <div className="asset-pills">{Object.entries(tracking.links).map(([channel, link]) => <a href={link} key={channel} target="_blank" rel="noreferrer">{channel} ↗</a>)}</div>}</div></article>
+  })}</div>
 }
 
 function sessionId() {

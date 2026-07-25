@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
 import { latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, storageProvider } from './store.js'
@@ -10,6 +10,8 @@ const distDirectory = path.resolve(process.cwd(), 'dist')
 const maxBodyBytes = 64 * 1024
 const rateWindowMs = 15 * 60 * 1000
 const rateLimit = new Map<string, { count: number; resetAt: number }>()
+const adminCookieName = 'vinted_admin_session'
+const adminSessionMaxAge = 60 * 60 * 8
 
 const defaultProduct: ProductConfig = {
   name: process.env.PRODUCT_NAME || 'Your SaaS product',
@@ -60,6 +62,32 @@ function clientIp(request: IncomingMessage) {
   return request.headers['x-forwarded-for']?.toString().split(',')[0].trim() || request.socket.remoteAddress || 'unknown'
 }
 
+function safeEqual(left: string, right: string) {
+  const expected = Buffer.from(left)
+  const actual = Buffer.from(right)
+  return expected.length === actual.length && timingSafeEqual(expected, actual)
+}
+
+function sessionSignature(expiresAt: number) {
+  const token = process.env.ADMIN_API_TOKEN
+  return token ? createHmac('sha256', token).update(String(expiresAt)).digest('hex') : ''
+}
+
+function sessionCookie(expiresAt: number) {
+  return `${expiresAt}.${sessionSignature(expiresAt)}`
+}
+
+function cookieValue(request: IncomingMessage, name: string) {
+  const cookieHeader = request.headers.cookie || ''
+  return cookieHeader.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) || ''
+}
+
+function hasSession(request: IncomingMessage) {
+  const [expiresAtText, signature] = cookieValue(request, adminCookieName).split('.')
+  const expiresAt = Number(expiresAtText)
+  return Number.isSafeInteger(expiresAt) && expiresAt > Math.floor(Date.now() / 1000) && safeEqual(signature || '', sessionSignature(expiresAt))
+}
+
 function consumeRateLimit(key: string, limit: number) {
   const now = Date.now()
   const current = rateLimit.get(key)
@@ -77,12 +105,10 @@ function hasAdminAccess(request: IncomingMessage) {
   if (!configuredToken && process.env.NODE_ENV !== 'production') return true
   if (!configuredToken) return false
   const provided = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : ''
-  const expected = Buffer.from(configuredToken)
-  const actual = Buffer.from(provided)
-  return expected.length === actual.length && timingSafeEqual(expected, actual)
+  return safeEqual(configuredToken, provided) || hasSession(request)
 }
 
-async function json(response: ServerResponse, status: number, payload: unknown) {
+async function json(response: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': origin(),
@@ -90,6 +116,7 @@ async function json(response: ServerResponse, status: number, payload: unknown) 
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
   })
   response.end(JSON.stringify(payload))
 }
@@ -125,6 +152,16 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (request.method === 'OPTIONS') return json(response, 204, null)
     if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: currentProvider(), storage: storageProvider, time: new Date().toISOString() })
+    if (url.pathname === '/api/admin/login' && request.method === 'POST') {
+      const input = await body(request)
+      if (typeof input.token !== 'string' || !safeEqual(process.env.ADMIN_API_TOKEN || '', input.token)) return json(response, 401, { error: 'Invalid admin token' })
+      const expiresAt = Math.floor(Date.now() / 1000) + adminSessionMaxAge
+      return json(response, 200, { authenticated: true, expiresAt }, { 'Set-Cookie': `${adminCookieName}=${sessionCookie(expiresAt)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${adminSessionMaxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}` })
+    }
+    if (url.pathname === '/api/admin/logout' && request.method === 'POST') {
+      return json(response, 200, { authenticated: false }, { 'Set-Cookie': `${adminCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === 'production' ? '; Secure' : ''}` })
+    }
+    if (url.pathname === '/api/admin/session' && request.method === 'GET') return json(response, 200, { authenticated: hasAdminAccess(request) })
     if (url.pathname === '/api/trends/discover' && request.method === 'GET') {
       if (!hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
       if (!consumeRateLimit(`trends:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
@@ -137,7 +174,8 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     }
     if (url.pathname === '/api/campaigns/latest' && request.method === 'GET') {
       if (!hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
-      return json(response, 200, { campaigns: await latestCampaigns() })
+      const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === defaultProduct.name)
+      return json(response, 200, { campaigns })
     }
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       if (!consumeRateLimit(`waitlist:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
