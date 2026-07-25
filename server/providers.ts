@@ -68,11 +68,15 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
   })
   const seen = new Set<string>()
   return signals.filter((signal) => {
-    const key = signal.topic.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+    const key = normalizeTrendTopic(signal.topic)
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
+}
+
+export function normalizeTrendTopic(topic: string) {
+  return topic.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 }
 
 function decodeXml(value: string) {
