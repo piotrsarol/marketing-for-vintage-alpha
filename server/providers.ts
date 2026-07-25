@@ -59,12 +59,19 @@ export async function discoverGoogleNews(product: ProductConfig): Promise<TrendS
   if (!response.ok) throw new Error(`Google News RSS request failed with ${response.status}`)
   const xml = await response.text()
   const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 12)
-  return items.map((match, index) => {
+  const signals = items.map((match, index) => {
     const item = match[1]
     const title = decodeXml(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? `Fashion resale signal ${index + 1}`)
     const url = decodeXml(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '')
     const source = decodeXml(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? 'Google News')
     return { topic: title.split(' - ')[0].trim(), category: 'fashion resale', source, url, country: product.country, season: currentSeason(), keywords: title.toLowerCase().split(/\W+/).filter(Boolean).slice(0, 8), evidence: title }
+  })
+  const seen = new Set<string>()
+  return signals.filter((signal) => {
+    const key = signal.topic.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
   })
 }
 
@@ -78,13 +85,17 @@ function currentSeason() {
 }
 
 export async function evaluateTrend(signal: TrendSignal, product: ProductConfig): Promise<Evaluation> {
-  const result = await askOpenAI<Evaluation>(`Evaluate this fashion resale trend for the product below. Return JSON only with numeric 0-100 fields score, virality, commercialIntent, novelty, evergreenScore, vintedRelevance, predictedEngagement and arrays contentAngles, hooks, targetAudience plus reasoning string.\nProduct: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}`)
+  const result = await askOpenAI<Evaluation>(`Evaluate this fashion resale trend for the product below. Return JSON only with numeric 0-100 fields score, virality, commercialIntent, novelty, evergreenScore, vintedRelevance, predictedEngagement and arrays contentAngles, hooks, targetAudience plus reasoning string. Write all natural-language fields in ${product.language}.\nProduct: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}`)
   if (result) return { ...result, score: numberInRange(result.score, 70) }
   const score = Math.min(96, 62 + signal.keywords.length * 4)
   return { score, virality: score - 3, commercialIntent: score + 2, novelty: score - 8, evergreenScore: score - 15, vintedRelevance: score + 1, predictedEngagement: score - 2, reasoning: `Fallback scoring used because OPENAI_API_KEY is not configured. Evidence: ${signal.evidence}`, contentAngles: ['early demand signal', 'how to source before saturation'], hooks: [`The next resale signal may already be in your feed: ${signal.topic}.`], targetAudience: product.audience }
 }
 
 export async function generateContent(signal: TrendSignal, evaluation: Evaluation, product: ProductConfig) {
-  const result = await askOpenAI<Record<string, unknown>>(`Create one launch campaign from this approved trend for the product below. Return JSON only with keys linkedin, twitterThread, reddit, blog, email, instagram, tiktok, youtubeShort, carousel. Each value should be ready-to-publish copy or a structured outline. Include a clear but non-pushy waitlist CTA using ${product.callToAction}. Product: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}\nEvaluation: ${JSON.stringify(evaluation)}`)
-  return result ?? { linkedin: `A new signal is forming around ${signal.topic}. ${evaluation.reasoning}`, twitterThread: [`Signal: ${signal.topic}`, ...evaluation.hooks, product.callToAction], reddit: `What are sellers seeing around ${signal.topic}? Here is the early evidence: ${signal.evidence}`, blog: { title: `${signal.topic}: early resale signal or noise?`, outline: evaluation.contentAngles }, email: { subject: `Early signal: ${signal.topic}`, body: `We are watching ${signal.topic} before the market gets crowded. ${product.callToAction}` }, instagram: `${signal.topic} is moving. Save this signal and watch your sourcing data. ${product.callToAction}`, tiktok: { hook: evaluation.hooks[0], beats: evaluation.contentAngles, cta: product.callToAction }, youtubeShort: { hook: evaluation.hooks[0], durationSeconds: 35, beats: evaluation.contentAngles }, carousel: { slideCount: 8, title: `${signal.topic}: early or saturated?`, slides: evaluation.contentAngles } }
+  const result = await askOpenAI<Record<string, unknown>>(`Create one launch campaign from this approved trend for the product below. Return JSON only with keys linkedin, twitterThread, reddit, blog, email, instagram, tiktok, youtubeShort, carousel. Each value should be ready-to-publish copy or a structured outline. Write all user-facing copy in ${product.language}. Include a clear but non-pushy waitlist CTA using ${product.callToAction}. Product: ${JSON.stringify(product)}\nTrend: ${JSON.stringify(signal)}\nEvaluation: ${JSON.stringify(evaluation)}`)
+  if (result) return result
+  const polish = product.language.toLowerCase().startsWith('pl')
+  return polish
+    ? { linkedin: `Pojawia się nowy sygnał: ${signal.topic}. ${evaluation.reasoning}`, twitterThread: [`Sygnał: ${signal.topic}`, ...evaluation.hooks, product.callToAction], reddit: `Co sprzedający widzą wokół ${signal.topic}? Oto wczesne dane: ${signal.evidence}`, blog: { title: `${signal.topic}: chwilowy szum czy realny popyt?`, outline: evaluation.contentAngles }, email: { subject: `Nowy sygnał: ${signal.topic}`, body: `Obserwujemy ${signal.topic}, zanim rynek się zatłoczy. ${product.callToAction}` }, instagram: `${signal.topic} zyskuje na znaczeniu. Obserwuj dane i decyzje zakupowe. ${product.callToAction}`, tiktok: { hook: evaluation.hooks[0], beats: evaluation.contentAngles, cta: product.callToAction }, youtubeShort: { hook: evaluation.hooks[0], durationSeconds: 35, beats: evaluation.contentAngles }, carousel: { slideCount: 8, title: `${signal.topic}: rosnący popyt czy chwilowy trend?`, slides: evaluation.contentAngles } }
+    : { linkedin: `A new signal is forming around ${signal.topic}. ${evaluation.reasoning}`, twitterThread: [`Signal: ${signal.topic}`, ...evaluation.hooks, product.callToAction], reddit: `What are sellers seeing around ${signal.topic}? Here is the early evidence: ${signal.evidence}`, blog: { title: `${signal.topic}: early resale signal or noise?`, outline: evaluation.contentAngles }, email: { subject: `Early signal: ${signal.topic}`, body: `We are watching ${signal.topic} before the market gets crowded. ${product.callToAction}` }, instagram: `${signal.topic} is moving. Save this signal and watch your sourcing data. ${product.callToAction}`, tiktok: { hook: evaluation.hooks[0], beats: evaluation.contentAngles, cta: product.callToAction }, youtubeShort: { hook: evaluation.hooks[0], durationSeconds: 35, beats: evaluation.contentAngles }, carousel: { slideCount: 8, title: `${signal.topic}: early or saturated?`, slides: evaluation.contentAngles } }
 }
