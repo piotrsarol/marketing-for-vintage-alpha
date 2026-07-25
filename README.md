@@ -66,7 +66,7 @@ PRODUCT_COUNTRY=PL
 PRODUCT_SEARCH_QUERY=
 ```
 
-Generate `ADMIN_API_TOKEN` with `openssl rand -hex 32`. Keep it out of `VITE_*` variables and source code. `/api/health` and `/api/waitlist` are public; campaign discovery, execution, and stored-campaign reads require `Authorization: Bearer <ADMIN_API_TOKEN>`. Supabase tables have RLS enabled and are accessed only by the server-side service-role key.
+Generate `ADMIN_API_TOKEN` with `openssl rand -hex 32`. Keep it out of `VITE_*` variables and source code. `/api/health`, `/api/waitlist`, and `/api/admin/login` are public; the dashboard exchanges the token for an eight-hour HttpOnly session cookie, so campaign discovery, execution, and stored-campaign reads can be used from the browser without exposing the token to API responses. Direct API callers may still use `Authorization: Bearer <ADMIN_API_TOKEN>`. Supabase tables have RLS enabled and are accessed only by the server-side service-role key.
 
 ## Run with Docker
 
