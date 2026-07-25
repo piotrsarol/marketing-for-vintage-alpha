@@ -301,7 +301,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       return json(response, 200, {
         product,
         updatedAt: stored.updatedAt,
-        ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider },
+        ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastError: providerStatus().lastProviderError },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
         automation: { dailyWorkflow: true, workflowFile: 'automation/vinted-signal-daily.json' },
