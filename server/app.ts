@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { currentPublisher, publishQueuedItem } from './publishers.js'
-import { dashboardSnapshot, finishJobRun, latestCampaigns, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
+import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -27,6 +27,19 @@ const defaultProduct: ProductConfig = {
   callToAction: process.env.PRODUCT_CTA || 'Join the waitlist for early access.',
   country: process.env.PRODUCT_COUNTRY || 'PL',
   searchQuery: process.env.PRODUCT_SEARCH_QUERY || undefined,
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>) {
+  const results: R[] = []
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++
+      results[index] = await mapper(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()))
+  return results
 }
 
 async function body(request: IncomingMessage) {
@@ -185,7 +198,7 @@ async function runCampaign(product: ProductConfig) {
     .filter((campaign) => campaign.product.name === product.name)
     .map((campaign) => normalizeTrendTopic(campaign.trend.topic)))
   const fresh = discovered.filter((trend) => !existingTopics.has(normalizeTrendTopic(trend.topic)))
-  const evaluated = await Promise.all(fresh.slice(0, 6).map(async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) })))
+  const evaluated = await mapWithConcurrency(fresh.slice(0, 6), 2, async (trend) => ({ trend, evaluation: await evaluateTrend(trend, product) }))
   const approved = evaluated.filter((item) => item.evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70)).slice(0, 3)
   await Promise.all(evaluated.map(({ trend, evaluation }) => saveTrend(trend, evaluation, evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70) ? 'approved' : 'review')))
   const campaigns: Campaign[] = []
@@ -223,7 +236,7 @@ async function runCampaign(product: ProductConfig) {
     await saveQueueItems(saved.id, ['linkedin', 'instagram', 'tiktok', 'youtube', 'pinterest', 'email'])
     campaigns.push(saved)
   }
-  return { discovered: discovered.length, approved: approved.length, campaigns }
+  return { discovered: discovered.length, approved: approved.length, campaigns, provider: providerStatus() }
 }
 
 function slug(value: string) {
@@ -301,10 +314,13 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       const product = await configuredProduct()
       const stored = await loadOperatorSettings(defaultProduct)
+      const latestRun = await latestJobRun('campaign_pipeline')
+      const persistedProvider = latestRun?.output && typeof latestRun.output === 'object' && 'provider' in latestRun.output ? latestRun.output.provider : undefined
       return json(response, 200, {
         product,
         updatedAt: stored.updatedAt,
         ai: { provider: providerStatus().configured ? 'OpenAI configured' : 'Not configured', model: process.env.OPENAI_MODEL || 'gpt-5-mini', lastRequest: providerStatus().lastProvider, lastOperation: providerStatus().lastOperation, lastError: providerStatus().lastProviderError },
+        lastPipelineProvider: persistedProvider,
         marketplace: { provider: 'Scrappa', configured: Boolean(process.env.SCRAPPA_API_KEY) },
         publishing: { provider: currentPublisher(), configured: Boolean(process.env.PUBLISH_WEBHOOK_URL) },
         storage: storageProvider,
