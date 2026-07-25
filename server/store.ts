@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { Campaign } from './types.js'
+import type { Campaign, FunnelEvent, LeadAttribution } from './types.js'
 
 const dataDirectory = path.resolve(process.cwd(), '.data')
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
@@ -65,20 +65,56 @@ export async function latestCampaigns() {
   return readCollection<Campaign>('campaigns')
 }
 
-export async function saveLead(email: string, source: string) {
+export async function saveLead(email: string, attribution: LeadAttribution) {
   if (storageProvider === 'supabase') {
     try {
-      await supabaseRequest('waitlist_leads?on_conflict=email', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ email, source }) })
-      return { email, source }
+      await supabaseRequest('waitlist_leads?on_conflict=email', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({
+        email,
+        source: attribution.source,
+        landing_variant: attribution.landingVariant,
+        utm_source: attribution.utmSource,
+        utm_medium: attribution.utmMedium,
+        utm_campaign: attribution.utmCampaign,
+        utm_content: attribution.utmContent,
+        referrer: attribution.referrer,
+      }) })
+      return { email, ...attribution }
     } catch (error) {
       console.warn(error instanceof Error ? error.message : 'Supabase lead write failed; using local storage.')
       if (process.env.NODE_ENV === 'production') throw error
     }
   }
-  const leads = await readCollection<{ email: string; source: string; createdAt: string }>('leads')
+  const leads = await readCollection<{ email: string; createdAt: string } & LeadAttribution>('leads')
   if (!leads.some((lead) => lead.email.toLowerCase() === email.toLowerCase())) {
-    leads.unshift({ email, source, createdAt: new Date().toISOString() })
+    leads.unshift({ email, ...attribution, createdAt: new Date().toISOString() })
     await writeCollection('leads', leads)
   }
-  return { email, source }
+  return { email, ...attribution }
+}
+
+export async function saveFunnelEvent(event: FunnelEvent) {
+  if (storageProvider === 'supabase') {
+    try {
+      await supabaseRequest('funnel_events', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({
+        event: event.event,
+        session_id: event.sessionId,
+        path: event.path,
+        source: event.source,
+        landing_variant: event.landingVariant,
+        utm_source: event.utmSource,
+        utm_medium: event.utmMedium,
+        utm_campaign: event.utmCampaign,
+        utm_content: event.utmContent,
+        referrer: event.referrer,
+      }) })
+      return event
+    } catch (error) {
+      console.warn(error instanceof Error ? error.message : 'Supabase funnel event write failed; using local storage.')
+      if (process.env.NODE_ENV === 'production') throw error
+    }
+  }
+  const events = await readCollection<FunnelEvent & { createdAt: string }>('funnel-events')
+  events.unshift({ ...event, createdAt: new Date().toISOString() })
+  await writeCollection('funnel-events', events.slice(0, 10000))
+  return event
 }

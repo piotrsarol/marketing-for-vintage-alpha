@@ -40,7 +40,9 @@ curl -X POST http://localhost:3000/api/campaigns/run \
   -d '{"product":{"name":"Your app","url":"https://your-app.example","description":"What it does","audience":["your customers"],"callToAction":"Join the waitlist.","country":"PL"}}'
 ```
 
-When `SUPABASE_URL` and the server-only `SUPABASE_SERVICE_ROLE_KEY` are set, campaigns and waitlist leads are stored in Supabase; otherwise they are saved under `.data/` for the local MVP. Without `OPENAI_API_KEY`, the pipeline still runs with deterministic fallback scoring and copy so the workflow can be tested end to end; set the key to generate production-quality copy.
+When `SUPABASE_URL` and the server-only `SUPABASE_SERVICE_ROLE_KEY` are set, campaigns, waitlist leads, and funnel events are stored in Supabase; otherwise they are saved under `.data/` for the local MVP. Without `OPENAI_API_KEY`, the pipeline still runs with deterministic fallback scoring and copy so the workflow can be tested end to end; set the key to generate production-quality copy.
+
+Campaigns include channel-specific UTM links under `content.tracking.links`. The public landing page records `page_view` events and sends the same UTM attribution with waitlist signups, allowing conversion by campaign and channel to be measured without a paid analytics service. Apply `database/migrations/20260725_add_funnel_attribution.sql` to an existing Supabase project before deploying this version.
 
 For a live deployment, apply [`database/schema.sql`](./database/schema.sql) to the Supabase SQL editor, then configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment. The service-role key must remain server-side; the API health response reports `storage: "supabase"` when the connection is configured.
 

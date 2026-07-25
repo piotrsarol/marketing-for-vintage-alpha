@@ -3,8 +3,8 @@ import path from 'node:path'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, evaluateTrend, generateContent } from './providers.js'
-import { latestCampaigns, saveCampaign, saveLead, storageProvider } from './store.js'
-import type { Campaign, ProductConfig } from './types.js'
+import { latestCampaigns, saveCampaign, saveFunnelEvent, saveLead, storageProvider } from './store.js'
+import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
 const maxBodyBytes = 64 * 1024
@@ -34,6 +34,22 @@ function productFrom(input: unknown): ProductConfig {
   if (!input || typeof input !== 'object') return defaultProduct
   const value = input as Partial<ProductConfig>
   return { ...defaultProduct, ...value, audience: Array.isArray(value.audience) ? value.audience.filter((item): item is string => typeof item === 'string') : defaultProduct.audience }
+}
+
+function stringValue(value: unknown, maxLength = 200) {
+  return typeof value === 'string' ? value.slice(0, maxLength) : undefined
+}
+
+function attributionFrom(input: Record<string, unknown>): LeadAttribution {
+  return {
+    source: stringValue(input.source, 100) || 'direct',
+    landingVariant: stringValue(input.landingVariant, 100),
+    utmSource: stringValue(input.utmSource, 100),
+    utmMedium: stringValue(input.utmMedium, 100),
+    utmCampaign: stringValue(input.utmCampaign, 150),
+    utmContent: stringValue(input.utmContent, 150),
+    referrer: stringValue(input.referrer, 500),
+  }
 }
 
 function origin() {
@@ -84,16 +100,31 @@ async function runCampaign(product: ProductConfig) {
   const approved = evaluated.filter((item) => item.evaluation.score >= Number(process.env.MIN_TREND_SCORE || 70)).slice(0, 3)
   const campaigns: Campaign[] = []
   for (const { trend, evaluation } of approved) {
-    campaigns.push(await saveCampaign({ id: randomUUID(), product, trend, evaluation, content: await generateContent(trend, evaluation, product), provider: currentProvider(), createdAt: new Date().toISOString() }))
+    const campaignId = randomUUID()
+    const campaignSlug = `${slug(product.name)}-${slug(trend.topic)}`
+    const landingUrl = new URL(product.url)
+    landingUrl.searchParams.set('utm_campaign', campaignSlug)
+    const links = Object.fromEntries(['linkedin', 'twitter', 'reddit', 'email', 'instagram', 'tiktok', 'youtube', 'pinterest'].map((channel) => {
+      const link = new URL(landingUrl)
+      link.searchParams.set('utm_source', channel)
+      link.searchParams.set('utm_medium', 'organic')
+      link.searchParams.set('utm_content', campaignId)
+      return [channel, link.toString()]
+    }))
+    campaigns.push(await saveCampaign({ id: campaignId, product, trend, evaluation, content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }, provider: currentProvider(), createdAt: new Date().toISOString() }))
   }
   return { discovered: discovered.length, approved: approved.length, campaigns }
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'campaign'
 }
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse) {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (request.method === 'OPTIONS') return json(response, 204, null)
-    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: process.env.OPENAI_API_KEY ? 'openai' : 'mock', storage: storageProvider, time: new Date().toISOString() })
+    if (url.pathname === '/api/health') return json(response, 200, { ok: true, provider: currentProvider(), storage: storageProvider, time: new Date().toISOString() })
     if (url.pathname === '/api/trends/discover' && request.method === 'GET') {
       if (!hasAdminAccess(request)) return json(response, 401, { error: 'Unauthorized' })
       if (!consumeRateLimit(`trends:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
@@ -112,7 +143,15 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       if (!consumeRateLimit(`waitlist:${clientIp(request)}`, 10)) return json(response, 429, { error: 'Rate limit exceeded' })
       const input = await body(request)
       if (typeof input.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return json(response, 400, { error: 'A valid email is required.' })
-      return json(response, 201, await saveLead(input.email.trim().toLowerCase(), typeof input.source === 'string' ? input.source.slice(0, 100) : 'direct'))
+      const attribution = attributionFrom(input)
+      await saveFunnelEvent({ ...attribution, event: 'waitlist_signup', path: stringValue(input.path, 500) })
+      return json(response, 201, await saveLead(input.email.trim().toLowerCase(), attribution))
+    }
+    if (url.pathname === '/api/events' && request.method === 'POST') {
+      if (!consumeRateLimit(`events:${clientIp(request)}`, 60)) return json(response, 429, { error: 'Rate limit exceeded' })
+      const input = await body(request)
+      if (input.event !== 'page_view') return json(response, 400, { error: 'Unsupported event.' })
+      return json(response, 201, await saveFunnelEvent({ ...attributionFrom(input), event: 'page_view', sessionId: stringValue(input.sessionId, 100), path: stringValue(input.path, 500) } satisfies FunnelEvent))
     }
     if (url.pathname.startsWith('/api/')) return json(response, 404, { error: 'Not found' })
     const requested = url.pathname === '/' ? '/index.html' : url.pathname
