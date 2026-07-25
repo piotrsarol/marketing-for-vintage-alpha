@@ -1,4 +1,5 @@
 import type { Campaign, QueueItem } from './types.js'
+import { campaignImageUrl } from './assets.js'
 
 export type PublisherName = 'buffer' | 'webhook' | 'mock'
 
@@ -71,17 +72,14 @@ function contentImageUrl(campaign: Campaign): string | undefined {
     if (typeof asset?.image?.url === 'string') return asset.image.url
   }
   if (typeof content.imageUrl === 'string') return content.imageUrl
-  return process.env.BUFFER_DEFAULT_IMAGE_URL
+  return undefined
 }
 
 async function publishToBuffer(item: QueueItem, campaign: Campaign) {
   const channelId = bufferChannelId(item.platform)
   if (!channelId) throw new Error(`No Buffer channel configured for ${item.platform}. Set BUFFER_CHANNEL_${item.platform.toUpperCase()} or BUFFER_CHANNEL_IDS.`)
   const isInstagram = item.platform === 'instagram'
-  const imageUrl = isInstagram ? contentImageUrl(campaign) : undefined
-  if (isInstagram && !imageUrl) {
-    throw new Error('Instagram publishing needs a public image URL. Add BUFFER_DEFAULT_IMAGE_URL or campaign content.imageUrl.')
-  }
+  const imageUrl = isInstagram ? contentImageUrl(campaign) || await campaignImageUrl(campaign) : undefined
   const isDue = new Date(item.scheduledFor).getTime() <= Date.now()
   const input = {
     text: campaignText(item.platform, campaign),
