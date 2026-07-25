@@ -46,7 +46,7 @@ For a live deployment, apply [`database/schema.sql`](./database/schema.sql) to t
 
 ### Vercel deployment
 
-Vercel serves the Vite frontend and the `api/[[...path]].ts` serverless function together. Configure these project environment variables in Vercel for **Production** and **Preview** as appropriate:
+Vercel serves the Vite frontend and the `api/[...path].ts` serverless function together. Configure these project environment variables in Vercel for **Production** and **Preview** as appropriate:
 
 ```env
 OPENAI_API_KEY=
