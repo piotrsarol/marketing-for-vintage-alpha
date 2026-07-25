@@ -23,12 +23,32 @@ function App() {
   const [email, setEmail] = useState('')
   const [signedUp, setSignedUp] = useState(() => Boolean(localStorage.getItem('vinted-signal-waitlist')))
   const [notice, setNotice] = useState('')
+  const [running, setRunning] = useState(false)
   const [trendFilter, setTrendFilter] = useState('All sources')
   const filteredTrends = useMemo(() => trendFilter === 'All sources' ? trends : trends.filter((trend) => trend.sourceType === trendFilter), [trendFilter])
-  function submitWaitlist(event: FormEvent<HTMLFormElement>) {
+  async function submitWaitlist(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!email.includes('@')) { setNotice('Enter a valid email to join the waitlist.'); return }
-    localStorage.setItem('vinted-signal-waitlist', email); setSignedUp(true); setNotice('You are on the list. We will send the first signal report soon.')
+    try {
+      const response = await fetch('/api/waitlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, source: 'dashboard-landing' }) })
+      if (!response.ok) throw new Error('API unavailable')
+    } catch {
+      localStorage.setItem('vinted-signal-waitlist', email)
+    }
+    setSignedUp(true); setNotice('You are on the list. We will send the first signal report soon.')
+  }
+  async function runLiveCampaign() {
+    setRunning(true)
+    try {
+      const response = await fetch('/api/campaigns/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      const result = await response.json() as { approved?: number; error?: string }
+      if (!response.ok) throw new Error(result.error || 'Campaign run failed')
+      setNotice(`Campaign run complete: ${result.approved ?? 0} approved campaigns saved.`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Campaign run failed. Start the API server first.')
+    } finally {
+      setRunning(false)
+    }
   }
   return <div className="app-shell">
     <aside className="sidebar">
@@ -41,7 +61,7 @@ function App() {
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>{view === 'overview' ? 'Overview' : view === 'trends' ? 'Trend radar' : view === 'content' ? 'Content studio' : view === 'queue' ? 'Publishing queue' : 'Waitlist'}</b></div><div className="top-actions"><button className="icon-button" aria-label="Search">⌕</button><button className="icon-button" aria-label="Notifications">♢<i /></button><div className="user-menu"><span className="avatar small">PS</span><span>Piotr Sarol</span><span>⌄</span></div></div></header>
       {view === 'overview' && <Overview onExplore={() => setView('trends')} />}
       {view === 'trends' && <section className="page-section"><PageIntro eyebrow="DEMAND VALIDATION" title="Trend radar" description="Every signal is scored for momentum, commercial intent, and relevance to Vinted sellers." action={<button className="primary-button" onClick={() => setNotice('Discovery run queued for the next available worker.')}>Run discovery <span>↗</span></button>} /><div className="filter-row"><div className="tabs"><button className="active">All signals <span>24</span></button><button>Approved <span>18</span></button><button>Needs review <span>6</span></button></div><select value={trendFilter} onChange={(event) => setTrendFilter(event.target.value)}><option>All sources</option><option>Google Trends</option><option>Pinterest</option><option>Reddit</option><option>RSS</option></select></div><TrendTable data={filteredTrends} /></section>}
-      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="One approved trend becomes a complete multi-channel campaign, ready for review or scheduling." action={<button className="primary-button" onClick={() => setNotice('Campaign generation started for Adidas Samba OG.')}>Generate campaign <span>✦</span></button>} /><div className="content-grid">{[['LinkedIn post', '1,240', '+18%', 'blue'], ['Instagram carousel', '3,810', '+31%', 'pink'], ['TikTok script', '—', 'Ready', 'dark']].map(([label, value, change, color]) => <div className="content-card" key={label}><div className={`social-icon ${color}`}>{label[0]}</div><div><span>{label}</span><strong>{value}</strong><em>{change}</em></div><button>Open ↗</button></div>)}</div><div className="studio-preview"><div><span className="eyebrow">CAMPAIGN PREVIEW</span><h2>Adidas Samba OG</h2><p>8 assets generated from a single trend brief. Images, carousel slides, short-form scripts, and captions are ready for scheduling.</p><div className="asset-pills"><span>▣ 8 slides</span><span>◉ 3 scripts</span><span>✉ 1 email</span></div></div><div className="phone-preview"><div className="phone-top">VINTED SIGNAL <span>•••</span></div><div className="shoe-art">SAMBA<br /><i>OG</i></div><div className="phone-copy">The signal is early.<br /><b>Are you?</b></div></div></div></section>}
+      {view === 'content' && <section className="page-section"><PageIntro eyebrow="AI CONTENT ENGINE" title="Content studio" description="One approved trend becomes a complete multi-channel campaign, ready for review or scheduling." action={<button className="primary-button" onClick={runLiveCampaign} disabled={running}>{running ? 'Running…' : 'Run real campaign'} <span>✦</span></button>} /><div className="content-grid">{[['LinkedIn post', '1,240', '+18%', 'blue'], ['Instagram carousel', '3,810', '+31%', 'pink'], ['TikTok script', '—', 'Ready', 'dark']].map(([label, value, change, color]) => <div className="content-card" key={label}><div className={`social-icon ${color}`}>{label[0]}</div><div><span>{label}</span><strong>{value}</strong><em>{change}</em></div><button>Open ↗</button></div>)}</div><div className="studio-preview"><div><span className="eyebrow">CAMPAIGN PREVIEW</span><h2>Live product configuration</h2><p>The API discovers current signals for the configured product, evaluates them, and saves a full multi-channel campaign. Configure PRODUCT_* in .env before running.</p><div className="asset-pills"><span>▣ carousel</span><span>◉ short-form</span><span>✉ email</span></div></div><div className="phone-preview"><div className="phone-top">VINTED SIGNAL <span>•••</span></div><div className="shoe-art">LIVE<br /><i>RUN</i></div><div className="phone-copy">Real signals.<br /><b>Today.</b></div></div></div></section>}
       {view === 'queue' && <section className="page-section"><PageIntro eyebrow="DISTRIBUTION" title="Publishing queue" description="Your approved content is queued across channels with built-in retry handling." action={<button className="secondary-button" onClick={() => setNotice('Queue exported as CSV.')}>Export queue</button>} /><div className="queue-list">{queue.map((item) => <div className="queue-item" key={item.title}><div className={`social-icon ${item.color}`}>{item.icon}</div><div className="queue-copy"><b>{item.title}</b><span>{item.platform} · {item.time}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status}</span><button className="more">•••</button></div>)}</div></section>}
       {view === 'leads' && <section className="page-section"><PageIntro eyebrow="DEMAND SIGNAL" title="Waitlist" description="Capture early interest before launch and understand which content turns into qualified demand." action={<button className="secondary-button" onClick={() => setNotice('CSV export prepared.')}>Export leads</button>} /><div className="lead-layout"><div className="lead-card"><span className="eyebrow">TOTAL SIGNUPS</span><strong>248</strong><span className="positive">↑ 24% this week</span><div className="sparkline">{Array.from({ length: 11 }, (_, index) => <i key={index} />)}</div></div><div className="lead-card"><span className="eyebrow">CONVERSION RATE</span><strong>6.8%</strong><span className="positive">↑ 1.2 pts this week</span><div className="conversion-bar"><span /></div><small>Landing page visitors · 3,647</small></div></div><div className="lead-table"><div className="table-heading"><span>Recent signups</span><span>Source</span><span>Joined</span></div>{['anna@vintageclub.co', 'milo.resells@gmail.com', 'hello@retro-room.com', 'kasia.thrift@gmail.com'].map((lead, index) => <div className="table-row" key={lead}><b>{lead}</b><span>{['Instagram', 'Google', 'TikTok', 'Pinterest'][index]}</span><span>Today, {['14:32', '12:08', '10:41', '09:16'][index]}</span></div>)}</div></section>}
       {notice && <button className="toast" onClick={() => setNotice('')}>{notice} <span>×</span></button>}

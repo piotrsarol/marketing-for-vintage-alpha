@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "lint": "eslint .",
     "preview": "vite preview",
-    "type-check": "tsc -b --pretty false"
+    "type-check": "tsc -b --pretty false && tsc -p tsconfig.server.json --noEmit",
+    "start": "node dist-server/server/index.js"
   },
   "dependencies": {
     "react": "^19.2.7",
