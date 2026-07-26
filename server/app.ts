@@ -242,9 +242,12 @@ async function runCampaign(product: ProductConfig) {
     }))
     const content: Record<string, unknown> = { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }
     if (currentPublisher() === 'buffer') {
-      const [imageUrl, videoUrl] = await Promise.all([campaignImageUrl({ id: campaignId, product, trend, evaluation, strategy: {} as Campaign['strategy'], content: {}, provider: currentProvider(), createdAt: new Date().toISOString() }), campaignVideoUrl({ id: campaignId, product, trend, evaluation, strategy: {} as Campaign['strategy'], content: {}, provider: currentProvider(), createdAt: new Date().toISOString() })])
-      content.imageUrl = imageUrl
-      content.videoUrl = videoUrl
+      const assetCampaign = { id: campaignId, product, trend, evaluation, strategy: {} as Campaign['strategy'], content: {}, provider: currentProvider(), createdAt: new Date().toISOString() } satisfies Campaign
+      const [imageResult, videoResult] = await Promise.allSettled([campaignImageUrl(assetCampaign), campaignVideoUrl(assetCampaign)])
+      if (imageResult.status === 'fulfilled') content.imageUrl = imageResult.value
+      else console.warn(`Campaign image preparation failed for ${campaignId}: ${imageResult.reason instanceof Error ? imageResult.reason.message : 'unknown error'}`)
+      if (videoResult.status === 'fulfilled') content.videoUrl = videoResult.value
+      else console.warn(`Campaign video preparation failed for ${campaignId}: ${videoResult.reason instanceof Error ? videoResult.reason.message : 'unknown error'}`)
     }
     return {
       id: campaignId,
