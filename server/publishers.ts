@@ -1,5 +1,5 @@
 import type { Campaign, QueueItem } from './types.js'
-import { campaignImageUrl } from './assets.js'
+import { campaignImageUrl, campaignVideoUrl } from './assets.js'
 
 export type PublisherName = 'buffer' | 'webhook' | 'mock'
 
@@ -103,7 +103,11 @@ async function publishToBuffer(item: QueueItem, campaign: Campaign) {
   const channelId = bufferChannelId(item.platform)
   if (!channelId) throw new Error(`No Buffer channel configured for ${item.platform}. Set BUFFER_CHANNEL_${item.platform.toUpperCase()} or BUFFER_CHANNEL_IDS.`)
   const isInstagram = item.platform === 'instagram'
-  const imageUrl = isInstagram ? contentImageUrl(campaign) || await campaignImageUrl(campaign) : undefined
+  const isFacebook = item.platform === 'facebook'
+  const isYouTube = item.platform === 'youtube'
+  const imageUrl = isInstagram || isFacebook ? contentImageUrl(campaign) || await campaignImageUrl(campaign) : undefined
+  const videoUrl = isYouTube ? await campaignVideoUrl(campaign) : undefined
+  const youtubeTitle = `${campaign.trend.topic} | Vintage Alpha`.slice(0, 100)
   const isDue = new Date(item.scheduledFor).getTime() <= Date.now()
   const input = {
     text: campaignText(item.platform, campaign),
@@ -112,7 +116,20 @@ async function publishToBuffer(item: QueueItem, campaign: Campaign) {
     mode: isDue ? 'shareNow' : 'customScheduled',
     ...(isDue ? {} : { dueAt: item.scheduledFor }),
     ...(imageUrl ? { assets: [{ image: { url: imageUrl } }] } : {}),
+    ...(videoUrl ? { assets: [{ video: { url: videoUrl } }] } : {}),
     ...(isInstagram ? { metadata: { instagram: { type: 'post', shouldShareToFeed: true } } } : {}),
+    ...(isYouTube ? {
+      metadata: {
+        youtube: {
+          title: youtubeTitle,
+          categoryId: '22',
+          privacy: 'public',
+          license: 'youtube',
+          madeForKids: false,
+          notifySubscribers: true,
+        },
+      },
+    } : {}),
   }
   const response = await fetch('https://api.buffer.com', {
     method: 'POST',
