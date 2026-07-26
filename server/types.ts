@@ -75,10 +75,15 @@ export type Campaign = {
     angle: string
     primaryChannel: string
     successMetric: 'landing_page_conversion'
+    recommendedChannels?: string[]
+    recommendedCadenceDays?: number
+    recommendedTimeWindow?: string
+    recommendationReason?: string
   }
   content: Record<string, unknown>
   provider: 'openai' | 'mock'
   createdAt: string
+  workflowStatus?: 'planned' | 'scheduled'
 }
 
 export type LeadAttribution = {

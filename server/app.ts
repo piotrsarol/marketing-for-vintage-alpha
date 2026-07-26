@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { discoverMarketplaceData } from './marketplace.js'
 import { configuredPublisherPlatforms, currentPublisher, publishQueuedItem, publisherConfigured, removeFromPublisher } from './publishers.js'
-import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
+import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateCampaignWorkflow, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
 const distDirectory = path.resolve(process.cwd(), 'dist')
@@ -217,6 +217,8 @@ async function runCampaign(product: ProductConfig) {
   }
   const discovered = [...marketplaceSignals, ...newsSignals]
   const existingCampaigns = await latestCampaigns()
+  const historical = (await dashboardSnapshot()).funnel.campaigns
+  const bestHistorical = [...historical].sort((left, right) => right.signups - left.signups)[0]
   const existingTopics = new Set(existingCampaigns
     .filter((campaign) => campaign.product.name === product.name)
     .map((campaign) => normalizeTrendTopic(campaign.trend.topic)))
@@ -246,17 +248,25 @@ async function runCampaign(product: ProductConfig) {
         objective: 'waitlist_signups',
         hypothesis: `Vinted sellers will join early access if shown a fresh ${evaluation.productCategory || 'market'} opportunity and how to validate demand before sourcing.`,
         angle: evaluation.contentAngles[0] || 'data-led sourcing',
-        primaryChannel: 'linkedin',
+        primaryChannel: configuredPublisherPlatforms()[0] || 'instagram',
         successMetric: 'landing_page_conversion',
+        recommendedChannels: configuredPublisherPlatforms(),
+        recommendedCadenceDays: 2,
+        recommendedTimeWindow: '18:00–20:00',
+        recommendationReason: bestHistorical
+          ? `The strongest measured campaign is "${bestHistorical.campaign}" with ${bestHistorical.signups} signup${bestHistorical.signups === 1 ? '' : 's'}; reuse the learning and publish every 2 days in the evening.`
+          : historical.length
+            ? `Based on ${historical.length} measured campaign${historical.length === 1 ? '' : 's'}, publish every 2 days in the evening, then compare landing-page conversion.`
+          : 'Start with every 2 days in the evening to collect a reliable baseline before optimizing cadence.',
       },
       content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } },
       provider: currentProvider(),
       createdAt: new Date().toISOString(),
+      workflowStatus: 'planned',
     } satisfies Campaign
   }))
   for (const campaign of generated) {
     const saved = await saveCampaign(campaign)
-    await saveQueueItems(saved.id, configuredPublisherPlatforms())
     campaigns.push(saved)
   }
   return { discovered: discovered.length, approved: approved.length, campaigns, provider: providerStatus() }
@@ -318,6 +328,29 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         await finishJobRun(jobId, 'failed', {}, message)
         throw error
       }
+    }
+    if (url.pathname === '/api/campaigns/approve' && request.method === 'POST') {
+      if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
+      const input = await body(request)
+      const campaignIds = Array.isArray(input.campaignIds) ? input.campaignIds.filter((id): id is string => typeof id === 'string') : []
+      const startAt = typeof input.startAt === 'string' ? input.startAt : new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      const product = await configuredProduct()
+      const campaigns = (await latestCampaigns()).filter((campaign) => campaign.product.name === product.name)
+      const platforms = configuredPublisherPlatforms()
+      const results = []
+      for (const [index, campaignId] of campaignIds.entries()) {
+        const campaign = campaigns.find((item) => item.id === campaignId)
+        if (!campaign) {
+          results.push({ campaignId, status: 'failed', error: 'Campaign was not found.' })
+          continue
+        }
+        const cadenceHours = campaign.strategy.recommendedCadenceDays ? campaign.strategy.recommendedCadenceDays * 24 : 48
+        const campaignStartAt = new Date(new Date(startAt).getTime() + index * cadenceHours * 60 * 60 * 1000).toISOString()
+        const queueItems = await saveQueueItems(campaign.id, platforms, { startAt: campaignStartAt, spacingHours: 4 })
+        await updateCampaignWorkflow(campaign.id, 'scheduled')
+        results.push({ campaignId, status: 'scheduled', queueItems })
+      }
+      return json(response, 200, { results, platforms })
     }
     if (url.pathname === '/api/campaigns/latest' && request.method === 'GET') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })

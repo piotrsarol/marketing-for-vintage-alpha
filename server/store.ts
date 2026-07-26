@@ -145,12 +145,14 @@ export async function latestCampaigns() {
   return readCollection<Campaign>('campaigns')
 }
 
-export async function saveQueueItems(campaignId: string, platforms: string[]) {
+export async function saveQueueItems(campaignId: string, platforms: string[], options?: { startAt?: string; spacingHours?: number }) {
+  const startAt = options?.startAt ? new Date(options.startAt).getTime() : Date.now()
+  const spacingHours = options?.spacingHours ?? 24
   const items = platforms.map((platform, index) => ({
     id: randomUUID(),
     campaignId,
     platform,
-    scheduledFor: new Date(Date.now() + (index + 1) * 60 * 60 * 1000).toISOString(),
+    scheduledFor: new Date(startAt + index * spacingHours * 60 * 60 * 1000).toISOString(),
     status: 'queued' as const,
     attempts: 0,
   }))
@@ -173,6 +175,19 @@ export async function saveQueueItems(campaignId: string, platforms: string[]) {
   const queue = await readCollection<QueueItem>('publishing-queue')
   await writeCollection('publishing-queue', [...items, ...queue].slice(0, 500))
   return items
+}
+
+export async function updateCampaignWorkflow(campaignId: string, workflowStatus: Campaign['workflowStatus']) {
+  const campaigns = await latestCampaigns()
+  const campaign = campaigns.find((item) => item.id === campaignId)
+  if (!campaign) throw new Error('Campaign was not found.')
+  const updated = { ...campaign, workflowStatus }
+  if (storageProvider === 'supabase') {
+    await supabaseRequest(`campaigns?id=eq.${encodeURIComponent(campaignId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ payload: updated }) })
+    return updated
+  }
+  await writeCollection('campaigns', campaigns.map((item) => item.id === campaignId ? updated : item))
+  return updated
 }
 
 export async function updateQueueItem(id: string, update: Partial<Pick<QueueItem, 'status' | 'attempts' | 'externalId' | 'lastError'>>) {
