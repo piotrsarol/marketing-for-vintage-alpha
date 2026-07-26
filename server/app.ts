@@ -198,7 +198,7 @@ async function runCampaign(product: ProductConfig) {
   const marketplaceDiscoveries = marketplaceResult.status === 'fulfilled' ? marketplaceResult.value : []
   if (newsResult.status === 'rejected') console.warn(`Google News discovery failed: ${newsResult.reason instanceof Error ? newsResult.reason.message : 'unknown error'}`)
   if (marketplaceResult.status === 'rejected') console.warn(`Marketplace discovery failed: ${marketplaceResult.reason instanceof Error ? marketplaceResult.reason.message : 'unknown error'}`)
-  if (!newsSignals.length && !marketplaceDiscoveries.length) throw new Error('No market signals were available. Try discovery again in a few minutes.')
+  if (!newsSignals.length && !marketplaceDiscoveries.length) throw new Error('No market signals were available from Google News or Scrappa. Check the Scrappa connection and try discovery again in a few minutes.')
   const marketplaceSignals = []
   for (const discovery of marketplaceDiscoveries) {
     const snapshot = await saveMarketplaceSnapshot(discovery.snapshot)
@@ -341,7 +341,8 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Campaign pipeline failed'
         await finishJobRun(jobId, 'failed', {}, message)
-        throw error
+        const status = message.startsWith('No market signals were available') ? 503 : 502
+        return json(response, status, { error: message, jobId })
       }
     }
     if (url.pathname === '/api/campaigns/approve' && request.method === 'POST') {
