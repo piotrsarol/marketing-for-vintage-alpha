@@ -432,13 +432,18 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         const results = []
         for (const queueId of queueIds) {
           const item = snapshot.queue.find((candidate) => candidate.id === queueId)
-          if (!item || item.status !== 'queued' || !item.externalId) {
-            results.push({ queueId, status: 'failed', error: 'Only queued items with a Buffer post ID can be removed.' })
+          if (!item || (item.status !== 'queued' && item.status !== 'failed')) {
+            results.push({ queueId, status: 'failed', error: 'Only queued or failed items can be removed.' })
             continue
           }
           try {
-            await removeFromPublisher(item)
-            await updateQueueItem(item.id, { status: 'cancelled', lastError: 'Removed from Buffer by operator.' })
+            if (item.externalId) await removeFromPublisher(item)
+            await updateQueueItem(item.id, {
+              status: 'cancelled',
+              lastError: item.externalId
+                ? 'Removed from Buffer by operator.'
+                : 'Removed from queue by operator.',
+            })
             results.push({ queueId, status: 'removed' })
           } catch (error) {
             results.push({ queueId, status: 'failed', error: error instanceof Error ? error.message : 'Buffer removal failed' })
