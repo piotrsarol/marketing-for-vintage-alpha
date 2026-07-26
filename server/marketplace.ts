@@ -101,7 +101,12 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
     const prices = items.map((item) => priceDetails(item).amount).filter(Number.isFinite)
     const favourites = items.map((item) => item.favourite_count || 0)
     const currency = items.map((item) => priceDetails(item).currency).find(Boolean) || 'PLN'
-    const topItem = items.slice().sort((a, b) => (b.favourite_count || 0) - (a.favourite_count || 0))[0]
+    const rankedItems = items.slice().sort((a, b) => (b.favourite_count || 0) - (a.favourite_count || 0))
+    const topItem = rankedItems[0]
+    const imageUrls = rankedItems
+      .map((item) => item.photo_url || item.image_url)
+      .filter((url): url is string => Boolean(url))
+      .slice(0, 5)
     const evidence = `${items.length} active listings, median asking price ${median(prices)} ${currency}, average favourites ${Math.round(favourites.reduce((sum, value) => sum + value, 0) / items.length)}, top listing ${topItem?.favourite_count || 0} favourites. This is a live marketplace demand proxy, not confirmed sales data.`
     const snapshot: MarketplaceSnapshot = {
       query,
@@ -116,6 +121,7 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
     }
     const marketplace: MarketplaceObservation = {
       imageUrl: topItem?.photo_url || topItem?.image_url,
+      imageUrls,
       listingCount: snapshot.listingCount,
       medianPrice: snapshot.medianPrice,
       currency: snapshot.currency,
