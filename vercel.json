@@ -9,6 +9,7 @@
     { "source": "/api/publishing/process", "destination": "/api/publishing-process" },
     { "source": "/api/publishing/retry", "destination": "/api/publishing-process" },
     { "source": "/api/publishing/cleanup", "destination": "/api/publishing-process" },
+    { "source": "/api/publishing/remove", "destination": "/api/publishing-process" },
     { "source": "/api/campaigns/latest", "destination": "/api/campaigns-latest" },
     { "source": "/api/campaigns/run", "destination": "/api/campaigns-run" },
     { "source": "/api/trends/discover", "destination": "/api/trends-discover" }
