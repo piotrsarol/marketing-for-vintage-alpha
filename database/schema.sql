@@ -21,9 +21,26 @@ create table if not exists trends (
   content_angles jsonb not null default '[]',
   hooks jsonb not null default '[]',
   target_audience jsonb not null default '[]',
+  marketplace jsonb,
   status text not null default 'discovered' check (status in ('discovered','approved','rejected','review')),
   discovered_at timestamptz not null default now()
 );
+
+create table if not exists marketplace_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  query text not null,
+  country text not null,
+  observed_at timestamptz not null default now(),
+  listing_ids text[] not null default '{}',
+  listing_count integer not null default 0,
+  median_price numeric(12,2) not null default 0,
+  currency text not null default 'PLN',
+  average_favourites numeric(12,2) not null default 0,
+  top_favourites integer not null default 0
+);
+
+create index if not exists marketplace_snapshots_lookup_idx
+  on marketplace_snapshots(query, country, observed_at desc);
 
 create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
@@ -96,6 +113,7 @@ create index if not exists funnel_events_created_idx on funnel_events(created_at
 create index if not exists funnel_events_campaign_idx on funnel_events(utm_campaign, event);
 
 alter table trends enable row level security;
+alter table marketplace_snapshots enable row level security;
 alter table campaigns enable row level security;
 alter table publishing_queue enable row level security;
 alter table waitlist_leads enable row level security;
