@@ -1,12 +1,18 @@
+import { promisify } from 'node:util'
+import { execFile } from 'node:child_process'
 import { deflateSync } from 'node:zlib'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import ffmpegPath from 'ffmpeg-static'
 import sharp from 'sharp'
 import type { Campaign } from './types.js'
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const bucket = 'campaign-assets'
+const execFileAsync = promisify(execFile)
+const ffmpegExecutable = typeof ffmpegPath === 'string' ? ffmpegPath : ffmpegPath.default
 
 function crc32(buffer: Buffer) {
   let crc = 0xffffffff
@@ -227,6 +233,66 @@ async function productPng(campaign: Campaign) {
   }
 }
 
+function verticalOverlay(campaign: Campaign, slide: number, total: number) {
+  const marketplace = campaign.trend.marketplace
+  const topic = escapeXml(campaign.trend.topic)
+  const price = escapeXml(`${marketplace?.medianPrice || 0} ${marketplace?.currency || 'PLN'}`)
+  const rising = (marketplace?.medianPriceDelta || 0) > 0
+    || (marketplace?.listingCountDelta || 0) > 0
+    || (marketplace?.disappearedListingCount || 0) > 0
+  const color = rising ? '#56d39a' : '#c8baff'
+  return `<svg width="1080" height="1920" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17131e" stop-opacity=".12"/><stop offset="1" stop-color="#17131e" stop-opacity=".94"/></linearGradient></defs>
+    <rect width="1080" height="1920" fill="url(#shade)"/>
+    <text x="72" y="130" fill="#ffffff" font-family="Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="5">VINTAGE ALPHA</text>
+    <rect x="72" y="170" width="310" height="58" rx="29" fill="#17131e" fill-opacity=".82"/>
+    <text x="102" y="208" fill="${color}" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="2">${rising ? 'RISING SIGNAL' : 'WATCH SIGNAL'}</text>
+    <text x="72" y="1540" fill="#ffffff" font-family="Arial, sans-serif" font-size="58" font-weight="700">${topic}</text>
+    <text x="72" y="1600" fill="#d7ccff" font-family="Arial, sans-serif" font-size="28">${price} · ${marketplace?.listingCount || 0} active listings</text>
+    <rect x="72" y="1660" width="936" height="160" rx="22" fill="#17131e" fill-opacity=".86"/>
+    <text x="108" y="1710" fill="#aaa5af" font-family="Arial, sans-serif" font-size="18" letter-spacing="3">MARKET MOMENTUM</text>
+    <path d="${rising ? 'M 108 1780 L 330 1760 L 550 1770 L 770 1725 L 960 1690' : 'M 108 1780 L 330 1770 L 550 1778 L 770 1768 L 960 1770'}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="920" y="1710" fill="${color}" font-family="Arial, sans-serif" font-size="20" font-weight="700">${slide + 1}/${total}</text>
+  </svg>`
+}
+
+async function productSlideshowMp4(campaign: Campaign) {
+  if (!ffmpegExecutable) throw new Error('FFmpeg is not available for campaign slideshow generation.')
+  const imageUrls = campaign.trend.marketplace?.imageUrls || []
+  if (!imageUrls.length) throw new Error('No marketplace images are available for the campaign slideshow.')
+  const workDirectory = await mkdtemp(join(tmpdir(), 'vintage-alpha-slideshow-'))
+  try {
+    const imagePaths: string[] = []
+    for (const [index, imageUrl] of imageUrls.entries()) {
+      const response = await fetch(imageUrl)
+      if (!response.ok) continue
+      const slide = await sharp(Buffer.from(await response.arrayBuffer()))
+        .resize(1080, 1920, { fit: 'cover' })
+        .composite([{ input: Buffer.from(verticalOverlay(campaign, index, imageUrls.length)), blend: 'over' }])
+        .png()
+        .toBuffer()
+      const imagePath = join(workDirectory, `slide-${String(index + 1).padStart(2, '0')}.png`)
+      await writeFile(imagePath, slide)
+      imagePaths.push(imagePath)
+    }
+    if (!imagePaths.length) throw new Error('Marketplace image downloads returned no usable slides.')
+    const outputPath = join(workDirectory, 'campaign.mp4')
+    await execFileAsync(ffmpegExecutable, [
+      '-y',
+      '-framerate', '1/3',
+      '-i', join(workDirectory, 'slide-%02d.png'),
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-r', '30',
+      '-movflags', '+faststart',
+      outputPath,
+    ])
+    return await readFile(outputPath)
+  } finally {
+    await rm(workDirectory, { recursive: true, force: true })
+  }
+}
+
 async function ensureBucket() {
   if (!supabaseUrl || !supabaseKey) throw new Error('Supabase storage is required to generate Instagram assets.')
   const headers = { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
@@ -270,6 +336,14 @@ export async function campaignVideoUrl(campaign: Campaign) {
   if (process.env.BUFFER_DEFAULT_VIDEO_URL) return process.env.BUFFER_DEFAULT_VIDEO_URL
   await ensureBucket()
   const objectPath = `${campaign.id}.mp4`
+  let video = await readFile(join(process.cwd(), 'public', 'vintage-alpha-short.mp4'))
+  if (campaign.trend.marketplace?.imageUrls?.length) {
+    try {
+      video = await productSlideshowMp4(campaign)
+    } catch (error) {
+      console.warn(error instanceof Error ? `Campaign slideshow preparation failed: ${error.message}` : 'Campaign slideshow preparation failed')
+    }
+  }
   const response = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath}`, {
     method: 'POST',
     headers: {
@@ -278,7 +352,7 @@ export async function campaignVideoUrl(campaign: Campaign) {
       'Content-Type': 'video/mp4',
       'x-upsert': 'true',
     },
-    body: await readFile(join(process.cwd(), 'public', 'vintage-alpha-short.mp4')),
+    body: video,
   })
   if (!response.ok) throw new Error(`Supabase campaign video upload failed with ${response.status}`)
   return `${supabaseUrl}/storage/v1/object/public/${bucket}/${objectPath}`

@@ -30,6 +30,7 @@ export type TrendSignal = {
 
 export type MarketplaceObservation = {
   imageUrl?: string
+  imageUrls?: string[]
   snapshotId?: string
   listingCount: number
   medianPrice: number

@@ -206,6 +206,7 @@ async function runCampaign(product: ProductConfig) {
       ...discovery.signal,
       marketplace: {
         imageUrl: discovery.signal.marketplace?.imageUrl,
+        imageUrls: discovery.signal.marketplace?.imageUrls,
         listingCount: snapshot.listingCount,
         medianPrice: snapshot.medianPrice,
         currency: snapshot.currency,
