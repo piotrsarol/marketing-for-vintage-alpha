@@ -58,9 +58,16 @@ function brandedPng() {
 
 async function ensureBucket() {
   if (!supabaseUrl || !supabaseKey) throw new Error('Supabase storage is required to generate Instagram assets.')
+  const headers = { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
+  const existing = await fetch(`${supabaseUrl}/storage/v1/bucket/${bucket}`, { headers })
+  if (existing.ok) return
+  if (existing.status !== 404) {
+    throw new Error(`Supabase asset bucket lookup failed with ${existing.status}`)
+  }
+
   const response = await fetch(`${supabaseUrl}/storage/v1/bucket`, {
     method: 'POST',
-    headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json' },
+    headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: bucket, name: bucket, public: true }),
   })
   if (!response.ok && response.status !== 409) throw new Error(`Supabase asset bucket setup failed with ${response.status}`)
