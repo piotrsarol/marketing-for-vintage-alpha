@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { discoverMarketplaceData } from './marketplace.js'
 import { configuredPublisherPlatforms, currentPublisher, publishQueuedItem, publisherConfigured, removeFromPublisher } from './publishers.js'
+import { campaignImageUrl, campaignVideoUrl } from './assets.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateCampaignWorkflow, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
@@ -239,6 +240,12 @@ async function runCampaign(product: ProductConfig) {
       link.searchParams.set('utm_content', campaignId)
       return [channel, link.toString()]
     }))
+    const content: Record<string, unknown> = { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } }
+    if (currentPublisher() === 'buffer') {
+      const [imageUrl, videoUrl] = await Promise.all([campaignImageUrl({ id: campaignId, product, trend, evaluation, strategy: {} as Campaign['strategy'], content: {}, provider: currentProvider(), createdAt: new Date().toISOString() }), campaignVideoUrl({ id: campaignId, product, trend, evaluation, strategy: {} as Campaign['strategy'], content: {}, provider: currentProvider(), createdAt: new Date().toISOString() })])
+      content.imageUrl = imageUrl
+      content.videoUrl = videoUrl
+    }
     return {
       id: campaignId,
       product,
@@ -259,7 +266,7 @@ async function runCampaign(product: ProductConfig) {
             ? `Based on ${historical.length} measured campaign${historical.length === 1 ? '' : 's'}, publish every 2 days in the evening, then compare landing-page conversion.`
           : 'Start with every 2 days in the evening to collect a reliable baseline before optimizing cadence.',
       },
-      content: { ...await generateContent(trend, evaluation, product), tracking: { campaign: campaignSlug, links } },
+      content,
       provider: currentProvider(),
       createdAt: new Date().toISOString(),
       workflowStatus: 'planned',
@@ -347,8 +354,21 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         const cadenceHours = campaign.strategy.recommendedCadenceDays ? campaign.strategy.recommendedCadenceDays * 24 : 48
         const campaignStartAt = new Date(new Date(startAt).getTime() + index * cadenceHours * 60 * 60 * 1000).toISOString()
         const queueItems = await saveQueueItems(campaign.id, platforms, { startAt: campaignStartAt, spacingHours: 4 })
-        await updateCampaignWorkflow(campaign.id, 'scheduled')
-        results.push({ campaignId, status: 'scheduled', queueItems })
+        const providerResults = []
+        for (const queueItem of queueItems) {
+          try {
+            const published = await publishQueuedItem(queueItem, campaign)
+            await updateQueueItem(queueItem.id, { externalId: published.externalId, attempts: queueItem.attempts + 1, lastError: undefined })
+            providerResults.push({ queueId: queueItem.id, platform: queueItem.platform, status: 'scheduled', externalId: published.externalId })
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Buffer scheduling failed'
+            await updateQueueItem(queueItem.id, { status: 'failed', attempts: queueItem.attempts + 1, lastError: message })
+            providerResults.push({ queueId: queueItem.id, platform: queueItem.platform, status: 'failed', error: message })
+          }
+        }
+        const hasScheduled = providerResults.some((item) => item.status === 'scheduled')
+        await updateCampaignWorkflow(campaign.id, hasScheduled ? 'scheduled' : 'planned')
+        results.push({ campaignId, status: hasScheduled ? (providerResults.some((item) => item.status === 'failed') ? 'partial' : 'scheduled') : 'failed', queueItems, providerResults })
       }
       return json(response, 200, { results, platforms })
     }
@@ -425,21 +445,22 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         return json(response, 200, { cancelled: stale.length })
       }
       const isSingle = (url.pathname.endsWith('/publish') || url.pathname.endsWith('/retry')) && typeof input.queueId === 'string'
+      const scheduling = input.scheduleQueued === true
       const requestedIds = isSingle
         ? [input.queueId as string]
-        : snapshot.queue.filter((item) => item.status === 'queued' && new Date(item.scheduledFor).getTime() <= Date.now()).map((item) => item.id)
+        : snapshot.queue.filter((item) => item.status === 'queued' && !item.externalId && (scheduling || new Date(item.scheduledFor).getTime() <= Date.now())).map((item) => item.id)
       const results = []
       for (const queueId of requestedIds) {
         const item = snapshot.queue.find((candidate) => candidate.id === queueId)
         const campaign = item?.campaignId ? snapshot.campaigns.find((candidate) => candidate.id === item.campaignId) : undefined
-        if (!item || !campaign || (item.status !== 'queued' && item.status !== 'failed')) {
+        if (!item || !campaign || (item.status !== 'queued' && item.status !== 'failed') || (item.status === 'queued' && item.externalId)) {
           results.push({ queueId, status: 'failed', error: 'Campaign payload is not available for this queue item.' })
           continue
         }
         try {
           const published = await publishQueuedItem(item, campaign)
-          await updateQueueItem(item.id, { status: 'published', attempts: item.attempts + 1, externalId: published.externalId, lastError: undefined })
-          results.push({ queueId, status: 'published', externalId: published.externalId })
+          await updateQueueItem(item.id, { status: scheduling ? 'queued' : 'published', attempts: item.attempts + 1, externalId: published.externalId, lastError: undefined })
+          results.push({ queueId, status: scheduling ? 'scheduled' : 'published', externalId: published.externalId })
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Publishing failed'
           await updateQueueItem(item.id, { status: 'failed', attempts: item.attempts + 1, lastError: message })

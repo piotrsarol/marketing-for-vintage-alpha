@@ -17,7 +17,8 @@
   ],
   "functions": {
     "api/campaigns-run.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "public/vintage-alpha-short.mp4"
     },
     "api/publishing-process.ts": {
       "includeFiles": "public/vintage-alpha-short.mp4"
