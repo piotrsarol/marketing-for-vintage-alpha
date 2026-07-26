@@ -19,7 +19,7 @@
       "maxDuration": 60
     },
     "api/publishing-process.ts": {
-      "includeFiles": ["public/vintage-alpha-short.mp4"]
+      "includeFiles": "public/vintage-alpha-short.mp4"
     }
   }
 }
