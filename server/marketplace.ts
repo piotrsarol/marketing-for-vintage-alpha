@@ -73,7 +73,14 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
   const queries = product.searchQuery && !/seller|trend|demand|resale|fashion/i.test(product.searchQuery)
     ? [product.searchQuery, ...seedQueries]
     : seedQueries
-  const results = await Promise.all(queries.map(async (query) => ({ query, items: await searchScrappa(query, product.country) })))
+  const results = await Promise.all(queries.map(async (query) => {
+    try {
+      return { query, items: await searchScrappa(query, product.country) }
+    } catch (error) {
+      console.warn(error instanceof Error ? `Scrappa query failed for ${query}: ${error.message}` : `Scrappa query failed for ${query}`)
+      return { query, items: [] }
+    }
+  }))
   return results.filter(({ items }) => items.length > 0).map(({ query, items }) => {
     const prices = items.map((item) => Number(item.price?.amount)).filter(Number.isFinite)
     const favourites = items.map((item) => item.favourite_count || 0)

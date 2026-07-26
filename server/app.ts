@@ -193,7 +193,12 @@ async function json(response: ServerResponse, status: number, payload: unknown, 
 }
 
 async function runCampaign(product: ProductConfig) {
-  const [newsSignals, marketplaceDiscoveries] = await Promise.all([discoverGoogleNews(product), discoverMarketplaceData(product)])
+  const [newsResult, marketplaceResult] = await Promise.allSettled([discoverGoogleNews(product), discoverMarketplaceData(product)])
+  const newsSignals = newsResult.status === 'fulfilled' ? newsResult.value : []
+  const marketplaceDiscoveries = marketplaceResult.status === 'fulfilled' ? marketplaceResult.value : []
+  if (newsResult.status === 'rejected') console.warn(`Google News discovery failed: ${newsResult.reason instanceof Error ? newsResult.reason.message : 'unknown error'}`)
+  if (marketplaceResult.status === 'rejected') console.warn(`Marketplace discovery failed: ${marketplaceResult.reason instanceof Error ? marketplaceResult.reason.message : 'unknown error'}`)
+  if (!newsSignals.length && !marketplaceDiscoveries.length) throw new Error('No market signals were available. Try discovery again in a few minutes.')
   const marketplaceSignals = []
   for (const discovery of marketplaceDiscoveries) {
     const snapshot = await saveMarketplaceSnapshot(discovery.snapshot)
