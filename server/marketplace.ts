@@ -1,10 +1,14 @@
 import type { MarketplaceObservation, ProductConfig, TrendSignal } from './types.js'
 
 type ScrappaItem = {
-  id: number
+  id: number | string
   title: string
   brand_title?: string
-  price?: { amount?: string; currency_code?: string }
+  brand?: string
+  photo_url?: string
+  image_url?: string
+  price?: string | { amount?: string; currency_code?: string; currency?: string }
+  currency?: string
   favourite_count?: number
   url?: string
 }
@@ -12,6 +16,8 @@ type ScrappaItem = {
 type ScrappaResponse = {
   success?: boolean
   data?: { items?: ScrappaItem[] }
+  items?: ScrappaItem[]
+  results?: ScrappaItem[]
 }
 
 export type MarketplaceSnapshot = {
@@ -52,7 +58,7 @@ async function searchScrappa(query: string, country: string): Promise<ScrappaIte
     })
     if (!response.ok) throw new Error(`Scrappa request failed with ${response.status}`)
     const payload = await response.json() as ScrappaResponse
-    return payload.success === false ? [] : payload.data?.items || []
+    return payload.success === false ? [] : payload.data?.items || payload.items || payload.results || []
   } finally {
     clearTimeout(timeout)
   }
@@ -66,6 +72,16 @@ function median(values: number[]) {
 function cleanTopic(value: string | undefined, fallback: string) {
   const topic = (value || '').replace(/\bunknown\b/gi, '').replace(/\s+/g, ' ').trim()
   return topic || fallback
+}
+
+function priceDetails(item: ScrappaItem) {
+  if (typeof item.price === 'string') {
+    return { amount: Number(item.price), currency: item.currency || 'PLN' }
+  }
+  return {
+    amount: Number(item.price?.amount),
+    currency: item.price?.currency_code || item.price?.currency || item.currency || 'PLN',
+  }
 }
 
 export async function discoverMarketplaceData(product: ProductConfig): Promise<MarketplaceDiscovery[]> {
@@ -82,9 +98,9 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
     }
   }))
   return results.filter(({ items }) => items.length > 0).map(({ query, items }) => {
-    const prices = items.map((item) => Number(item.price?.amount)).filter(Number.isFinite)
+    const prices = items.map((item) => priceDetails(item).amount).filter(Number.isFinite)
     const favourites = items.map((item) => item.favourite_count || 0)
-    const currency = items.find((item) => item.price?.currency_code)?.price?.currency_code || 'PLN'
+    const currency = items.map((item) => priceDetails(item).currency).find(Boolean) || 'PLN'
     const topItem = items.slice().sort((a, b) => (b.favourite_count || 0) - (a.favourite_count || 0))[0]
     const evidence = `${items.length} active listings, median asking price ${median(prices)} ${currency}, average favourites ${Math.round(favourites.reduce((sum, value) => sum + value, 0) / items.length)}, top listing ${topItem?.favourite_count || 0} favourites. This is a live marketplace demand proxy, not confirmed sales data.`
     const snapshot: MarketplaceSnapshot = {
@@ -99,6 +115,7 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
       topFavourites: topItem?.favourite_count || 0,
     }
     const marketplace: MarketplaceObservation = {
+      imageUrl: topItem?.photo_url || topItem?.image_url,
       listingCount: snapshot.listingCount,
       medianPrice: snapshot.medianPrice,
       currency: snapshot.currency,
@@ -115,7 +132,7 @@ export async function discoverMarketplaceData(product: ProductConfig): Promise<M
       discoveryQuery: query,
       country: product.country,
       season: new Date().toLocaleString('en', { month: 'long' }),
-      keywords: [query, topItem?.brand_title || 'resale'].filter(Boolean),
+      keywords: [query, topItem?.brand_title || topItem?.brand || 'resale'].filter(Boolean),
       evidence,
       marketplace,
       },

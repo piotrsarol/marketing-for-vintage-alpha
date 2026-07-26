@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import sharp from 'sharp'
 import type { Campaign } from './types.js'
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
@@ -165,6 +166,67 @@ function brandedPng(campaign: Campaign) {
   ])
 }
 
+function escapeXml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;',
+  }[character] || character))
+}
+
+function marketOverlay(campaign: Campaign) {
+  const marketplace = campaign.trend.marketplace
+  const topic = escapeXml(campaign.trend.topic)
+  const category = escapeXml(campaign.evaluation.productCategory || campaign.trend.category)
+  const listingCount = marketplace?.listingCount || 0
+  const price = `${marketplace?.medianPrice || 0} ${marketplace?.currency || 'PLN'}`
+  const priceDelta = marketplace?.medianPriceDelta || 0
+  const listingDelta = marketplace?.listingCountDelta || 0
+  const rising = priceDelta > 0 || listingDelta > 0 || (marketplace?.disappearedListingCount || 0) > 0
+  const deltaLabel = rising ? 'RISING SIGNAL' : 'WATCH SIGNAL'
+  const deltaColor = rising ? '#56d39a' : '#c8baff'
+  const line = rising
+    ? 'M 780 315 L 850 290 L 920 305 L 990 250'
+    : 'M 780 315 L 850 305 L 920 312 L 990 300'
+  return `<svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1080" height="1080" fill="#17131e" fill-opacity=".7"/>
+    <rect x="48" y="48" width="984" height="984" rx="32" fill="none" stroke="#ffffff" stroke-opacity=".28"/>
+    <text x="88" y="112" fill="#ffffff" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="4">VINTAGE ALPHA</text>
+    <text x="88" y="190" fill="${deltaColor}" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">${deltaLabel}</text>
+    <text x="88" y="720" fill="#ffffff" font-family="Arial, sans-serif" font-size="48" font-weight="700">${topic}</text>
+    <text x="88" y="762" fill="#d7ccff" font-family="Arial, sans-serif" font-size="24">${category}</text>
+    <rect x="88" y="824" width="420" height="112" rx="18" fill="#17131e" fill-opacity=".86"/>
+    <text x="116" y="865" fill="#aaa5af" font-family="Arial, sans-serif" font-size="18">MEDIAN ASKING PRICE</text>
+    <text x="116" y="910" fill="#ffffff" font-family="Arial, sans-serif" font-size="34" font-weight="700">${escapeXml(price)}</text>
+    <rect x="700" y="210" width="300" height="210" rx="20" fill="#17131e" fill-opacity=".9"/>
+    <text x="730" y="255" fill="#aaa5af" font-family="Arial, sans-serif" font-size="16" letter-spacing="2">MARKET MOMENTUM</text>
+    <path d="${line}" fill="none" stroke="${deltaColor}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 975 250 L 990 250 L 990 265" fill="none" stroke="${deltaColor}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="730" y="370" fill="#ffffff" font-family="Arial, sans-serif" font-size="22" font-weight="700">${listingCount} ACTIVE LISTINGS</text>
+    <text x="730" y="400" fill="${deltaColor}" font-family="Arial, sans-serif" font-size="18">${rising ? 'Demand proxy is moving up' : 'Collecting baseline data'}</text>
+  </svg>`
+}
+
+async function productPng(campaign: Campaign) {
+  const imageUrl = campaign.trend.marketplace?.imageUrl
+  if (!imageUrl) return brandedPng(campaign)
+  try {
+    const response = await fetch(imageUrl)
+    if (!response.ok) throw new Error(`Product image returned ${response.status}`)
+    const source = Buffer.from(await response.arrayBuffer())
+    return sharp(source)
+      .resize(1080, 1080, { fit: 'cover' })
+      .composite([{ input: Buffer.from(marketOverlay(campaign)), blend: 'over' }])
+      .png()
+      .toBuffer()
+  } catch (error) {
+    console.warn(error instanceof Error ? `Product image preparation failed: ${error.message}` : 'Product image preparation failed')
+    return brandedPng(campaign)
+  }
+}
+
 async function ensureBucket() {
   if (!supabaseUrl || !supabaseKey) throw new Error('Supabase storage is required to generate Instagram assets.')
   const headers = { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
@@ -196,7 +258,7 @@ export async function campaignImageUrl(campaign: Campaign) {
       'Content-Type': 'image/png',
       'x-upsert': 'true',
     },
-    body: brandedPng(campaign),
+    body: await productPng(campaign),
   })
   if (!response.ok) throw new Error(`Supabase campaign asset upload failed with ${response.status}`)
   return `${supabaseUrl}/storage/v1/object/public/${bucket}/${objectPath}`
