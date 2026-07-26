@@ -117,6 +117,7 @@ async function publishToBuffer(item: QueueItem, campaign: Campaign) {
     ...(isDue ? {} : { dueAt: item.scheduledFor }),
     ...(imageUrl ? { assets: [{ image: { url: imageUrl } }] } : {}),
     ...(videoUrl ? { assets: [{ video: { url: videoUrl } }] } : {}),
+    ...(isFacebook ? { metadata: { facebook: { type: 'post' } } } : {}),
     ...(isInstagram ? { metadata: { instagram: { type: 'post', shouldShareToFeed: true } } } : {}),
     ...(isYouTube ? {
       metadata: {
