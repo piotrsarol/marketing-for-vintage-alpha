@@ -38,6 +38,30 @@ export async function publishQueuedItem(item: QueueItem, campaign: Campaign) {
   return { externalId: response.headers.get('x-publish-id') || `webhook-${item.id}` }
 }
 
+export async function removeFromPublisher(item: QueueItem) {
+  if (!process.env.BUFFER_ACCESS_TOKEN) throw new Error('Buffer is not configured.')
+  if (!item.externalId) throw new Error('Queue item has no Buffer post ID.')
+
+  const response = await fetch('https://api.buffer.com', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.BUFFER_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `mutation DeletePost($input: DeletePostInput!) {
+        deletePost(input: $input) {
+          ... on DeletePostSuccess { id }
+          ... on VoidMutationError { message }
+        }
+      }`,
+      variables: { input: { id: item.externalId } },
+    }),
+  })
+  if (!response.ok) throw new Error(`Buffer returned ${response.status}`)
+  const payload = await response.json() as { data?: { deletePost?: { id?: string; message?: string } }; errors?: Array<{ message?: string }> }
+  const error = payload.errors?.map((entry) => entry.message).filter(Boolean).join('; ') || payload.data?.deletePost?.message
+  if (error || !payload.data?.deletePost?.id) throw new Error(error || 'Buffer did not confirm post deletion.')
+  return { externalId: payload.data.deletePost.id }
+}
+
 function bufferChannelId(platform: string) {
   const key = `BUFFER_CHANNEL_${platform.toUpperCase()}`
   const direct = process.env[key]

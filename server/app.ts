@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { currentProvider, discoverGoogleNews, discoverMarketplaceSignals, evaluateTrend, generateContent, normalizeTrendTopic, providerStatus } from './providers.js'
 import { discoverMarketplaceData } from './marketplace.js'
-import { configuredPublisherPlatforms, currentPublisher, publishQueuedItem, publisherConfigured } from './publishers.js'
+import { configuredPublisherPlatforms, currentPublisher, publishQueuedItem, publisherConfigured, removeFromPublisher } from './publishers.js'
 import { dashboardSnapshot, finishJobRun, latestCampaigns, latestJobRun, loadOperatorSettings, saveCampaign, saveFunnelEvent, saveLead, saveMarketplaceSnapshot, saveOperatorSettings, saveQueueItems, saveTrend, startJobRun, storageProvider, updateQueueItem } from './store.js'
 import type { Campaign, FunnelEvent, LeadAttribution, ProductConfig } from './types.js'
 
@@ -358,13 +358,32 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const saved = await saveOperatorSettings(product)
       return json(response, 200, { product: saved.product, updatedAt: saved.updatedAt })
     }
-    if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process' || url.pathname === '/api/publishing/retry' || url.pathname === '/api/publishing/cleanup') && request.method === 'POST') {
+    if ((url.pathname === '/api/publishing/publish' || url.pathname === '/api/publishing/process' || url.pathname === '/api/publishing/retry' || url.pathname === '/api/publishing/cleanup' || url.pathname === '/api/publishing/remove') && request.method === 'POST') {
       if (!await hasAdminAccess(request)) return json(response, process.env.ADMIN_API_TOKEN ? 401 : 503, { error: process.env.ADMIN_API_TOKEN ? 'Unauthorized' : 'Admin API is not configured' })
       const product = await configuredProduct()
       const fullSnapshot = await dashboardSnapshot()
       const campaigns = fullSnapshot.campaigns.filter((campaign) => campaign.product.name === product.name)
       const snapshot = { ...fullSnapshot, campaigns, queue: fullSnapshot.queue.filter((item) => campaigns.some((campaign) => campaign.id === item.campaignId)) }
       const input = await body(request)
+      if (url.pathname.endsWith('/remove')) {
+        const queueIds = Array.isArray(input.queueIds) ? input.queueIds.filter((id): id is string => typeof id === 'string') : []
+        const results = []
+        for (const queueId of queueIds) {
+          const item = snapshot.queue.find((candidate) => candidate.id === queueId)
+          if (!item || item.status !== 'queued' || !item.externalId) {
+            results.push({ queueId, status: 'failed', error: 'Only queued items with a Buffer post ID can be removed.' })
+            continue
+          }
+          try {
+            await removeFromPublisher(item)
+            await updateQueueItem(item.id, { status: 'cancelled', lastError: 'Removed from Buffer by operator.' })
+            results.push({ queueId, status: 'removed' })
+          } catch (error) {
+            results.push({ queueId, status: 'failed', error: error instanceof Error ? error.message : 'Buffer removal failed' })
+          }
+        }
+        return json(response, 200, { provider: currentPublisher(), results })
+      }
       if (url.pathname.endsWith('/cleanup')) {
         const olderThanHours = typeof input.olderThanHours === 'number' && input.olderThanHours > 0 ? input.olderThanHours : 24
         const cutoff = Date.now() - olderThanHours * 60 * 60 * 1000
