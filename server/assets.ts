@@ -1,4 +1,6 @@
 import { deflateSync } from 'node:zlib'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Campaign } from './types.js'
 
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '')
@@ -81,5 +83,25 @@ export async function campaignImageUrl(campaign: Campaign) {
     body: brandedPng(),
   })
   if (!response.ok) throw new Error(`Supabase campaign asset upload failed with ${response.status}`)
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${objectPath}`
+}
+
+export async function campaignVideoUrl(campaign: Campaign) {
+  const content = campaign.content as Record<string, unknown>
+  if (typeof content.videoUrl === 'string') return content.videoUrl
+  if (process.env.BUFFER_DEFAULT_VIDEO_URL) return process.env.BUFFER_DEFAULT_VIDEO_URL
+  await ensureBucket()
+  const objectPath = `${campaign.id}.mp4`
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${objectPath}`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseKey as string,
+      Authorization: `Bearer ${supabaseKey}`,
+      'Content-Type': 'video/mp4',
+      'x-upsert': 'true',
+    },
+    body: await readFile(join(process.cwd(), 'public', 'vintage-alpha-short.mp4')),
+  })
+  if (!response.ok) throw new Error(`Supabase campaign video upload failed with ${response.status}`)
   return `${supabaseUrl}/storage/v1/object/public/${bucket}/${objectPath}`
 }
